@@ -22,17 +22,18 @@ class ABC_Net(nn.Module):
             # padding=1
         )
 
-        self.fc1 = nn.Linear(32*24*24, 10)
+        self.fc1 = nn.Linear(16*26*26, 10)
 
         self.relu = nn.ReLU(inplace=True)
         self.pool = nn.MaxPool2d(kernel_size=2)
     
     def forward(self, x):
+        # print(x.shape)
         B,C,H,W = x.shape
         x = self.conv1(x)
         x = self.relu(x)
-        x = self.conv2(x)
-        x = self.relu(x)
+        # x = self.conv2(x)
+        # x = self.relu(x)
 
         x = x.view(B, -1)
 
