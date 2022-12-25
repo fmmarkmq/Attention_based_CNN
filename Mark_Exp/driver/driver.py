@@ -19,8 +19,9 @@ class ABC_Driver(object):
     def __init__(self, args):
         self.args = args
         self.device = self._acquire_device()
-        self.model = self._build_model()
         self.data_loader = self._build_data_loader()
+        self.model = self._build_model()
+        
 
     def train(self, train_loader=None):
         if train_loader is None:
@@ -79,7 +80,8 @@ class ABC_Driver(object):
         return device
     
     def _build_model(self):
-        model = ABC_Net(self.args).to(self.device)
+        self.hash = self.get_cov_hashTable(self.data_loader.train.dataset.data)
+        model = ABC_Net(self.args, self.hash).to(self.device)
         return model
     
     def _build_data_loader(self):
@@ -99,3 +101,26 @@ class ABC_Driver(object):
         elif self.args.criterion == 'nll':
             criterion = nn.NLLLoss()
         return criterion
+
+    def get_cov_hashTable(self, data_mat:torch.tensor):
+        data_shape = data_mat.shape
+        data_mat=  data_mat.reshape(data_shape[0], -1, data_shape[-2], data_shape[-1])
+        B,C,H,W = data_mat.shape
+        idx_list_channels = []
+        for channel in range(C):
+            data_mat1 = data_mat[:,channel,:]
+            Num, Hi, Wi = data_mat1.shape
+            data_mat1 = data_mat1.reshape(-1, Hi*Wi)
+            cov  = torch.cov(data_mat1.T).abs()
+            val,idx = torch.topk(cov,k=9,dim=0,sorted=True,largest=True)
+            idx_expanded = torch.unsqueeze(idx.T, axis = 1)
+            idx_list_channels.append(idx_expanded)
+        full_idx_list = torch.concat(idx_list_channels, axis=1)
+        return {i: row for i, row in enumerate(full_idx_list)}
+
+        # N, HI, WI = data_mat.shape
+        # data_mat = data_mat.reshape(-1, HI*WI)
+        # cov  = torch.cov(data_mat.T).abs()
+        # val,idx = torch.topk(cov,k=9,dim=0,sorted=True,largest=True)
+        # hashtable = {i: row for i, row in enumerate(idx.T)}
+        # return hashtable
