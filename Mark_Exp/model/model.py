@@ -17,6 +17,7 @@ class ABC_Net(nn.Module):
                           pixel_number=784,
                           kernel_number_per_pixel=10,
                           hash=self.hash)
+        self.fc0 = nn.Linear(28*28, 10*28*28)
 
         self.fc1 = nn.Linear(10*28*28, 10)
         self.relu = nn.ReLU(inplace=True)
@@ -27,6 +28,8 @@ class ABC_Net(nn.Module):
         # start_time = time.time
         B,C,H,W = x.shape
         x = self.ABC_2D(x)
+        # x = x.reshape(B, -1)
+        # x = self.fc0(x)
         x = self.relu(x)
         # B, kernel_number_per_pixel, H*W
 

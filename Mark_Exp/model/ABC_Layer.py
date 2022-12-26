@@ -14,13 +14,14 @@ class ABC_2D(nn.Module):
         self.kernel_size = kernel_size
         self.pixel_number = pixel_number
         self.kernel_number_per_pixel = kernel_number_per_pixel
-        self.weights = nn.Parameter(torch.ones(pixel_number, kernel_number_per_pixel, in_channel*kernel_size))
+        self.weights = nn.Parameter(torch.empty(pixel_number, kernel_number_per_pixel, in_channel*kernel_size))
+        nn.init.normal_(self.weights)
         self.register_parameter('weights', self.weights)
 
         
     def forward(self, x):
         x = self.img_reconstruction(self.hash, x, multi_channel=True)
-        w_times_x = torch.matmul(self.weights, x)
+        w_times_x = self.weights.matmul(x)
         return w_times_x.transpose(0,2)
     
     def img_reconstruction(self, hashtable, img, multi_channel=True):
@@ -44,5 +45,5 @@ class ABC_2D(nn.Module):
         all_idx = torch.empty((0))
         for batch in range(B):
             all_idx = torch.concat([all_idx, sigle_img_idx + H*W*C*batch])
-        final_img = img.take(all_idx.long().to(device)).reshape(-1, H*W, B).transpose(0,1)
+        final_img = img.take(all_idx.long().to(device)).reshape(B, H*W, -1).permute(1,2,0)
         return final_img
