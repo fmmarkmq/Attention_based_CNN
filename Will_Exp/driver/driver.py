@@ -129,36 +129,36 @@ class ABC_Driver(object):
     def xy_to_idx(self, x: int, y: int, board_size: int = 28) -> int:
         return x * board_size + y
 
-    def get_cov_hashTable(self, data_mat):
-        data_shape = data_mat.shape
-        data_mat=  data_mat.reshape(data_shape[0], -1, data_shape[-2], data_shape[-1])
-        B,C,H,W = data_mat.shape
-        idx_list_channels = []
-        for channel in range(C):
-            for i in range(2,27):
-                for j in range(2,27):
-                    center_idx = self.xy_to_idx(i,j)
-                    idx_lst = self.get_surrounding_pixel_indices(np.empty([H,W]), center_idx)
-                    idx_lst.append(center_idx)
-    #                 print(center_idx, idx_lst)
-                    idx_list_channels.append(torch.tensor([idx_lst]))
-        return {int(row[0][-1]): row for i, row in enumerate(idx_list_channels)}
-
-    # def get_cov_hashTable(self, data_mat:torch.tensor):
+    # def get_cov_hashTable(self, data_mat):
     #     data_shape = data_mat.shape
     #     data_mat=  data_mat.reshape(data_shape[0], -1, data_shape[-2], data_shape[-1])
     #     B,C,H,W = data_mat.shape
     #     idx_list_channels = []
     #     for channel in range(C):
-    #         data_mat1 = data_mat[:,channel,:]
-    #         Num, Hi, Wi = data_mat1.shape
-    #         data_mat1 = data_mat1.reshape(-1, Hi*Wi)
-    #         cov  = torch.cov(data_mat1.T).abs()
-    #         val,idx = torch.topk(cov,k=9,dim=0,sorted=True,largest=True)
-    #         idx_expanded = torch.unsqueeze(idx.T, axis = 1)
-    #         idx_list_channels.append(idx_expanded)
-    #     full_idx_list = torch.concat(idx_list_channels, axis=1)
-    #     return {i: row for i, row in enumerate(full_idx_list)}
+    #         for i in range(2,27):
+    #             for j in range(2,27):
+    #                 center_idx = self.xy_to_idx(i,j)
+    #                 idx_lst = self.get_surrounding_pixel_indices(np.empty([H,W]), center_idx)
+    #                 idx_lst.append(center_idx)
+    # #                 print(center_idx, idx_lst)
+    #                 idx_list_channels.append(torch.tensor([idx_lst]))
+    #     return {int(row[0][-1]): row for i, row in enumerate(idx_list_channels)}
+
+    def get_cov_hashTable(self, data_mat:torch.tensor):
+        data_shape = data_mat.shape
+        data_mat=  data_mat.reshape(data_shape[0], -1, data_shape[-2], data_shape[-1])
+        B,C,H,W = data_mat.shape
+        idx_list_channels = []
+        for channel in range(C):
+            data_mat1 = data_mat[:,channel,:]
+            Num, Hi, Wi = data_mat1.shape
+            data_mat1 = data_mat1.reshape(-1, Hi*Wi)
+            cov  = torch.cov(data_mat1.T).abs()
+            val,idx = torch.topk(cov,k=9,dim=0,sorted=True,largest=True)
+            idx_expanded = torch.unsqueeze(idx.T, axis = 1)
+            idx_list_channels.append(idx_expanded)
+        full_idx_list = torch.concat(idx_list_channels, axis=1)
+        return {i: row for i, row in enumerate(full_idx_list)}
 
         # N, HI, WI = data_mat.shape
         # data_mat = data_mat.reshape(-1, HI*WI)

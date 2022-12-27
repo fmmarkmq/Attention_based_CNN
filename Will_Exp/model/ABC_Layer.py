@@ -37,8 +37,8 @@ class ABC_2D(nn.Module):
         #     return img.take(all_idx.long()).reshape(-1, HI*WI, B)
 
         B,C,H,W = img.shape
-        H=25
-        W=25
+        # H=25
+        # W=25
         sigle_img_idx = torch.empty((0))
         for key in hashtable.keys():
             idx = hashtable[key]
@@ -48,5 +48,6 @@ class ABC_2D(nn.Module):
         for batch in range(B):
             all_idx = torch.concat([all_idx, sigle_img_idx + H*W*C*batch])
         # final_img = img.take(all_idx.long().to(device)).reshape(-1, H*W, B).transpose(0,1)
-        final_img = img.take(all_idx.long().to(device)).reshape(-1, H*W, B).transpose(0,1)
+        # final_img = img.take(all_idx.long().to(device)).reshape(-1, H*W, B).transpose(0,1)
+        final_img = img.take(all_idx.long().to(device)).reshape(B, H*W, -1).permute(1,2,0)
         return final_img

@@ -14,11 +14,11 @@ class ABC_Net(nn.Module):
 
         self.ABC_2D = ABC_2D(in_channel=1,
                           kernel_size=9,
-                          pixel_number=625,
-                          kernel_number_per_pixel=16,
+                          pixel_number=784,
+                          kernel_number_per_pixel=6,
                           hash=self.hash)
 
-        self.fc1 = nn.Linear(16*25*25, 10)
+        self.fc1 = nn.Linear(6*28*28, 10)
         self.relu = nn.ReLU(inplace=True)
         self.pool = nn.MaxPool2d(kernel_size=2)
         self.softmax = nn.Softmax(1)
