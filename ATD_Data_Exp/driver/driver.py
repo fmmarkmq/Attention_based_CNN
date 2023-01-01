@@ -16,16 +16,18 @@ from model.model import ABC_Net
 from data.data_loader import ABC_data_loader
 
 class ABC_Driver(object):
-    def __init__(self, args):
+    def __init__(self, args, df:pd.DataFrame):
+        self.data = df
         self.args = args
         self.device = self._acquire_device()
         self.data_loader = self._build_data_loader()
+        # self.model = self._build_model().to(self.device)
         self.model = self._build_model()
         
 
     def train(self, train_loader=None):
         if train_loader is None:
-            train_loader = self.data_loader.train 
+            train_loader = self.data_loader.train
         model =self.model
         device = self.device
         model_optim = self._select_optimizer()
@@ -35,6 +37,8 @@ class ABC_Driver(object):
         for epoch in range(self.args.train_epochs):
             train_loss=[]
             for idx, (inputs, labels) in enumerate(train_loader):
+                # inputs=inputs.to(torch.float32)
+                # labels=labels.to(torch.float32)
                 inputs=inputs.to(device)
                 labels=labels.to(device)
                 model_optim.zero_grad(set_to_none = True)
@@ -47,26 +51,45 @@ class ABC_Driver(object):
             print(f'epoch: {epoch}, train_loss: {train_loss}')
         return self
 
+    # def predict(self, pred_loader=None):
+    #     if pred_loader is None:
+    #         pred_loader = self.data_loader.predict 
+    #     model =self.model
+    #     device = self.device
+        
+    #     model.eval()
+    #     preds = torch.tensor([])
+    #     for idx, (inputs, labels) in enumerate(pred_loader):
+    #         pred = model(inputs.to(device)).cpu().detach()
+    #         preds = torch.concat([preds, pred])
+    #     return preds
+
+    # def update_df(self, new_rows):
+    #     #tmp = self.df.drop(["timeStamps"], axis=1)
+    #     tmp = self.df
+    #     last_idx=tmp.index[-len(new_rows):]
+    #     new_df = pd.DataFrame(new_rows, index=last_idx+self.args.predict_len, columns=tmp.columns)
+    #     tmp = pd.concat([tmp, new_df])
+        
+    #     #tmp.insert(0, "timeStamps", tmp.index)
+    #     self.df = tmp
+    #     return
+
     def predict(self, pred_loader=None):
         if pred_loader is None:
-            pred_loader = self.data_loader.predict 
+            pred_loader = self.data_loader.predict
         model =self.model
         device = self.device
-        
+
         model.eval()
         preds = torch.tensor([])
-        for idx, (inputs, labels) in enumerate(pred_loader):
+        for idx, (inputs)in enumerate(pred_loader):
             pred = model(inputs.to(device)).cpu().detach()
-            preds = torch.concat([preds, pred])
+            preds=torch.concat([preds, pred])
         return preds
 
-    def metric(self, pred_loader=None):
-        if pred_loader is None:
-            pred_loader = self.data_loader.predict 
-        y_true = pred_loader.dataset.targets
-        y_pred = self.predict(pred_loader)
-        return accuracy_score(y_true, y_pred.argmax(axis=1))
-    
+
+
     def _acquire_device(self):
         if self.args.use_gpu:
             os.environ["CUDA_VISIBLE_DEVICES"] = str(self.args.gpu) if not self.args.use_multi_gpu else self.args.devices
@@ -85,7 +108,7 @@ class ABC_Driver(object):
         return model
     
     def _build_data_loader(self):
-        data_loader = ABC_data_loader(self.args)
+        data_loader = ABC_data_loader(self.args, self.data)
         return data_loader
     
     def _select_optimizer(self):
