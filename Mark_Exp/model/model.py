@@ -39,44 +39,44 @@ class ABC_Net(nn.Module):
         self.ABC_2D_1 = ABC_2D(in_channel=self.args.knpp,
                           kernel_size=self.args.kernel_size,
                           pixel_number=self.pixel_number,
-                          kernel_number_per_pixel=self.args.predict_len,
+                          kernel_number_per_pixel=self.args.knpp2,
                           hash=self.hash)
 
         # self.rwl = RowWiseLinear(5200, self.args.knpp, out_width=self.args.predict_len)
-        # self.fc1 = nn.Linear(self.args.knpp*self.args.input_height*self.args.input_width, 10)
-        self.fc1 = nn.Linear(self.args.input_height*self.args.input_width, self.args.input_height*self.args.input_width)
+        self.fc1 = nn.Linear(self.args.knpp2*self.args.input_height*self.args.input_width, 10)
+        # self.fc1 = nn.Linear(self.args.input_height*self.args.input_width, self.args.input_height*self.args.input_width)
         self.relu = nn.ReLU(inplace=True)
         self.softmax = nn.Softmax(1)
     
-    # atd_model
-    def forward(self, x):
-        B,C,H,W = x.shape
-        x = self.ABC_2D(x)
-        x = self.relu(x)
-        x = x.reshape(B, self.args.knpp, H, W)
-        # B, knpp, H, W
-
-        x = self.ABC_2D_1(x)
-        x = x.reshape(B, self.args.predict_len,H*W)
-        x = self.relu(x)
-        x = self.fc1(x)
-        x = x.reshape(B, self.args.predict_len, H, W)
-        # B, 4, 1, 5200
-        return x
-
-    # # mnist_model
+    # # atd_model
     # def forward(self, x):
     #     B,C,H,W = x.shape
     #     x = self.ABC_2D(x)
     #     x = self.relu(x)
-    #     # B, kernel_number_per_pixel, H*W
+    #     # B, -1, H, W
 
-    #     x = x.reshape(B, -1)
+    #     x = self.ABC_2D_1(x)
+    #     x = self.relu(x)
+    #     # B, -1, H, W
     #     x = self.fc1(x)
-    #     # B, 10
-
-    #     x = self.softmax(x)
+    #     x = x.reshape(B, self.args.predict_len, H, W)
+    #     # B, 4, 1, 5200
     #     return x
+
+    # mnist_model
+    def forward(self, x):
+        B,C,H,W = x.shape
+        x = self.ABC_2D(x)
+        x = self.relu(x)
+        # B, -1, H, W
+
+        x = self.ABC_2D_1(x)
+        x = self.relu(x)
+        # B, -1, H, W
+        x = x.reshape(B, -1)
+        x = self.fc1(x)
+        x = self.softmax(x)
+        return x
 
 
 

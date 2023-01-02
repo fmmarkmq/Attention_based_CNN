@@ -121,10 +121,7 @@ class ABC_Driver(object):
                 val,idx = torch.topk(corr,k=self.args.kernel_size,dim=0,sorted=True,largest=True)
                 idx_list_channels.append(idx.T+channel*H*W)
             full_idx_list = torch.concat(idx_list_channels, axis=1)
-            full_idx = torch.empty((0))
-            for i in range(self.args.input_channel):
-                full_idx = torch.concat([full_idx, full_idx_list + i*H*W], axis=1)
-            all_idx = torch.empty((0))
-            for batch in range(self.args.train.batch_size):
-                all_idx = torch.concat([all_idx, full_idx + batch*C*H*W], axis=0)
-            return all_idx
+            # full_idx = torch.empty((0))
+            # for i in range(self.args.input_channel):
+            #     full_idx = torch.concat([full_idx, full_idx_list + i*H*W], axis=1)
+            return full_idx_list

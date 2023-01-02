@@ -7,22 +7,23 @@ import gc
 
 
 class ABC_2D(nn.Module):
-    def __init__(self, in_channel, kernel_size, pixel_number, kernel_number_per_pixel, hash=None):
+    def __init__(self, in_channel, kernel_size, pixel_number, kernel_number_per_pixel, batch_size=100, hash=None):
         super().__init__()
-        self.hash = hash
         self.in_channel = in_channel
         self.kernel_size = kernel_size
         self.pixel_number = pixel_number
-        self.kernel_number_per_pixel = kernel_number_per_pixel 
+        self.kernel_number_per_pixel = kernel_number_per_pixel
+        self.batch_size = batch_size
+        self.hash = self._build_full_hash(hash)
         self.weights = nn.Parameter(torch.empty(pixel_number, kernel_number_per_pixel, in_channel*kernel_size))
         nn.init.normal_(self.weights)
         # self.register_parameter('weights', self.weights)
-
         
     def forward(self, x):
+        B,C,H,W = x.shape
         x = self.img_reconstruction(self.hash, x)
         w_times_x = self.weights.matmul(x)
-        return w_times_x.transpose(0,2)
+        return w_times_x.transpose(0,2).reshape(B, -1, H, W)
     
     def img_reconstruction(self, hashtable, img):
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -34,10 +35,22 @@ class ABC_2D(nn.Module):
             hash = torch.empty((0))
             for batch in range(B):
                 hash = torch.concat([hash, hashtable + batch*C*H*W])
-        if self.kernel_size*self.in_channel < hashtable.shape[1]:
-            hash = hash[:, :self.kernel_size*self.in_channel]
         final_img = img.take(hash.reshape(-1).long().to(device)).reshape(B, H*W, -1).permute(1,2,0)
         return final_img
+    
+    def _build_full_hash(self, hashtable):
+        HH,HW = hashtable.shape
+        if self.kernel_size*self.in_channel < HW:
+            hash = hashtable[:, :self.kernel_size*self.in_channel]
+        else:
+            hash = torch.empty((0))
+            for channel in range(int(self.kernel_size*self.in_channel/HW)):
+                hash = torch.concat([hash, hashtable + channel*HW/self.kernel_size*self.pixel_number], axis=1)
+        full_hash = torch.empty((0))
+        for bacth in range(self.batch_size):
+            full_hash = torch.concat([full_hash, hash + bacth*self.in_channel*self.pixel_number], axis=0)
+        return full_hash
+
 
 # class ABC_2D_Large(nn.Module):
 #     def __init__(self, in_channel, kernel_size, pixel_number, kernel_number_per_pixel, hash=None):
