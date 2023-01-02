@@ -5,40 +5,81 @@ from torch.utils.data import Dataset,DataLoader
 import time
 from model.ABC_Layer import ABC_2D
 
+class RowWiseLinear(nn.Module):
+    def __init__(self, height, width, out_width):
+        super().__init__()
+        self.height = height
+        self.width = width
+        self.weights = nn.Parameter(torch.ones(height, out_width, width))
+        self.register_parameter('weights', self.weights)
+        # self.weights = nn.Parameter(weights)
+        # self.weights = torch.ones(height, 1, width).to('cuda')
+        # self.register_buffer('mybuffer', self.weights)
+
+        
+    def forward(self, x):
+        x_unsqueezed = x.unsqueeze(-1)
+        w_times_x = torch.matmul(self.weights, x_unsqueezed)
+        return w_times_x
+
 
 class ABC_Net(nn.Module):
     def __init__(self, args, hash):
         super(ABC_Net, self).__init__()
         self.args = args
         self.hash = hash
+        self.pixel_number = self.args.input_height * self.args.input_width
 
-        self.ABC_2D = ABC_2D(in_channel=1,
-                          kernel_size=9,
-                          pixel_number=784,
-                          kernel_number_per_pixel=10,
+        self.ABC_2D = ABC_2D(in_channel=self.args.input_channel,
+                          kernel_size=self.args.kernel_size,
+                          pixel_number=self.pixel_number,
+                          kernel_number_per_pixel=self.args.knpp,
                           hash=self.hash)
-        self.fc0 = nn.Linear(28*28, 10*28*28)
+        
+        self.ABC_2D_1 = ABC_2D(in_channel=self.args.knpp,
+                          kernel_size=self.args.kernel_size,
+                          pixel_number=self.pixel_number,
+                          kernel_number_per_pixel=self.args.predict_len,
+                          hash=self.hash)
 
-        self.fc1 = nn.Linear(10*28*28, 10)
+        # self.rwl = RowWiseLinear(5200, self.args.knpp, out_width=self.args.predict_len)
+        # self.fc1 = nn.Linear(self.args.knpp*self.args.input_height*self.args.input_width, 10)
+        self.fc1 = nn.Linear(self.args.input_height*self.args.input_width, self.args.input_height*self.args.input_width)
         self.relu = nn.ReLU(inplace=True)
-        self.pool = nn.MaxPool2d(kernel_size=2)
         self.softmax = nn.Softmax(1)
     
+    # atd_model
     def forward(self, x):
-        # start_time = time.time
         B,C,H,W = x.shape
         x = self.ABC_2D(x)
-        # x = x.reshape(B, -1)
-        # x = self.fc0(x)
         x = self.relu(x)
-        # B, kernel_number_per_pixel, H*W
+        x = x.reshape(B, self.args.knpp, H, W)
+        # B, knpp, H, W
 
-        x = x.reshape(B, -1)
+        x = self.ABC_2D_1(x)
+        x = x.reshape(B, self.args.predict_len,H*W)
+        x = self.relu(x)
         x = self.fc1(x)
-        # B, 10
-
-        x = self.softmax(x)
+        x = x.reshape(B, self.args.predict_len, H, W)
+        # B, 4, 1, 5200
         return x
+
+    # # mnist_model
+    # def forward(self, x):
+    #     B,C,H,W = x.shape
+    #     x = self.ABC_2D(x)
+    #     x = self.relu(x)
+    #     # B, kernel_number_per_pixel, H*W
+
+    #     x = x.reshape(B, -1)
+    #     x = self.fc1(x)
+    #     # B, 10
+
+    #     x = self.softmax(x)
+    #     return x
+
+
+
 
 
 

@@ -13,11 +13,12 @@ from sklearn.metrics import f1_score
 from sklearn.metrics import recall_score
 
 from model.model import ABC_Net
-from data.data_loader import ABC_data_loader
+from data.data_loader import ABC_Data_Loader
 
 class ABC_Driver(object):
-    def __init__(self, args):
+    def __init__(self, args, data=None):
         self.args = args
+        self.data = data
         self.device = self._acquire_device()
         self.data_loader = self._build_data_loader()
         self.model = self._build_model()
@@ -85,7 +86,7 @@ class ABC_Driver(object):
         return model
     
     def _build_data_loader(self):
-        data_loader = ABC_data_loader(self.args)
+        data_loader = ABC_Data_Loader(self.args, self.data)
         return data_loader
     
     def _select_optimizer(self):
@@ -100,27 +101,30 @@ class ABC_Driver(object):
             criterion = nn.CrossEntropyLoss()
         elif self.args.criterion == 'nll':
             criterion = nn.NLLLoss()
+        elif self.args.criterion == "mse":
+            criterion = nn.MSELoss()
         return criterion
 
     def get_cov_hashTable(self, data_mat:torch.tensor):
-        data_shape = data_mat.shape
-        data_mat=  data_mat.reshape(data_shape[0], -1, data_shape[-2], data_shape[-1])
-        B,C,H,W = data_mat.shape
-        idx_list_channels = []
-        for channel in range(C):
-            data_mat1 = data_mat[:,channel,:]
-            Num, Hi, Wi = data_mat1.shape
-            data_mat1 = data_mat1.reshape(-1, Hi*Wi)
-            cov  = torch.cov(data_mat1.T).abs()
-            val,idx = torch.topk(cov,k=9,dim=0,sorted=True,largest=True)
-            idx_expanded = torch.unsqueeze(idx.T, axis = 1)
-            idx_list_channels.append(idx_expanded)
-        full_idx_list = torch.concat(idx_list_channels, axis=1)
-        return {i: row for i, row in enumerate(full_idx_list)}
-
-        # N, HI, WI = data_mat.shape
-        # data_mat = data_mat.reshape(-1, HI*WI)
-        # cov  = torch.cov(data_mat.T).abs()
-        # val,idx = torch.topk(cov,k=9,dim=0,sorted=True,largest=True)
-        # hashtable = {i: row for i, row in enumerate(idx.T)}
-        # return hashtable
+            data_shape = data_mat.shape
+            data_mat=  data_mat.reshape(data_shape[0], -1, data_shape[-2], data_shape[-1])
+            B,C,H,W = data_mat.shape
+            idx_list_channels = []
+            for channel in range(C):
+                data_mat1 = data_mat[:,channel,:]
+                Num, Hi, Wi = data_mat1.shape
+                data_mat1 = data_mat1.reshape(-1, Hi*Wi).T
+                cov = torch.cov(data_mat1).abs()
+                var = torch.var(data_mat1.to(torch.float32), axis=1).abs()
+                var[var<0.01] = var[var<0.01] + 1
+                corr = (cov/var.pow(0.5)).T/var.pow(0.5)
+                val,idx = torch.topk(corr,k=self.args.kernel_size,dim=0,sorted=True,largest=True)
+                idx_list_channels.append(idx.T+channel*H*W)
+            full_idx_list = torch.concat(idx_list_channels, axis=1)
+            full_idx = torch.empty((0))
+            for i in range(self.args.input_channel):
+                full_idx = torch.concat([full_idx, full_idx_list + i*H*W], axis=1)
+            all_idx = torch.empty((0))
+            for batch in range(self.args.train.batch_size):
+                all_idx = torch.concat([all_idx, full_idx + batch*C*H*W], axis=0)
+            return all_idx
