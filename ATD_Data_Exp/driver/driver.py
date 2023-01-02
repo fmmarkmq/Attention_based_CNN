@@ -21,8 +21,8 @@ class ABC_Driver(object):
         self.args = args
         self.device = self._acquire_device()
         self.data_loader = self._build_data_loader()
-        # self.model = self._build_model().to(self.device)
-        self.model = self._build_model()
+        self.model = self._build_model().to(self.device)
+        # self.model = self._build_model()
         
 
     def train(self, train_loader=None):
@@ -36,12 +36,14 @@ class ABC_Driver(object):
         model.train()
         for epoch in range(self.args.train_epochs):
             train_loss=[]
+            # start_time = time.time()
             for idx, (inputs, labels) in enumerate(train_loader):
-                # inputs=inputs.to(torch.float32)
-                # labels=labels.to(torch.float32)
+                inputs=inputs.to(torch.float32)
+                labels=labels.to(torch.float32)
                 inputs=inputs.to(device)
                 labels=labels.to(device)
                 model_optim.zero_grad(set_to_none = True)
+                # print(inputs.shape)
                 preds = model(inputs)
                 loss = criterion(preds,labels)
                 train_loss.append(loss.item())
@@ -70,6 +72,7 @@ class ABC_Driver(object):
     #     last_idx=tmp.index[-len(new_rows):]
     #     new_df = pd.DataFrame(new_rows, index=last_idx+self.args.predict_len, columns=tmp.columns)
     #     tmp = pd.concat([tmp, new_df])
+    
         
     #     #tmp.insert(0, "timeStamps", tmp.index)
     #     self.df = tmp
@@ -84,6 +87,7 @@ class ABC_Driver(object):
         model.eval()
         preds = torch.tensor([])
         for idx, (inputs)in enumerate(pred_loader):
+            inputs=inputs.to(torch.float32)
             pred = model(inputs.to(device)).cpu().detach()
             preds=torch.concat([preds, pred])
         return preds
@@ -123,6 +127,8 @@ class ABC_Driver(object):
             criterion = nn.CrossEntropyLoss()
         elif self.args.criterion == 'nll':
             criterion = nn.NLLLoss()
+        elif self.args.criterion == "mse":
+            criterion = nn.MSELoss()
         return criterion
 
 
@@ -169,6 +175,7 @@ class ABC_Driver(object):
 
     def get_cov_hashTable(self, data_mat:torch.tensor):
         data_shape = data_mat.shape
+        # print(data_shape)
         data_mat=  data_mat.reshape(data_shape[0], -1, data_shape[-2], data_shape[-1])
         B,C,H,W = data_mat.shape
         idx_list_channels = []
@@ -178,10 +185,18 @@ class ABC_Driver(object):
             data_mat1 = data_mat1.reshape(-1, Hi*Wi)
             cov  = torch.cov(data_mat1.T).abs()
             val,idx = torch.topk(cov,k=9,dim=0,sorted=True,largest=True)
-            idx_expanded = torch.unsqueeze(idx.T, axis = 1)
-            idx_list_channels.append(idx_expanded)
+            # idx_expanded = torch.unsqueeze(idx.T, axis = 1)
+            # print(idx_expanded.shape)
+            idx_list_channels.append(idx.T+channel*H*W)
         full_idx_list = torch.concat(idx_list_channels, axis=1)
-        return {i: row for i, row in enumerate(full_idx_list)}
+        full_idx = torch.empty((0))
+        for i in range(self.args.input_channel):
+            full_idx = torch.concat([full_idx, full_idx_list + i*H*W], axis=1)
+        # return {i: row for i, row in enumerate(full_idx_list)}
+        all_idx = torch.empty((0))
+        for batch in range(self.args.batch_size):
+            all_idx = torch.concat([all_idx, full_idx + batch*C*H*W], axis=0)
+        return all_idx
 
         # N, HI, WI = data_mat.shape
         # data_mat = data_mat.reshape(-1, HI*WI)

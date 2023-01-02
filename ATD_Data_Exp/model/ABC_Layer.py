@@ -4,7 +4,7 @@ from torch import nn
 from torch.utils.data import Dataset,DataLoader
 from statsmodels.tsa.api import VAR
 import gc
-
+import time
 
 class ABC_2D(nn.Module):
     def __init__(self, in_channel, kernel_size, pixel_number, kernel_number_per_pixel, hash=None):
@@ -26,28 +26,7 @@ class ABC_2D(nn.Module):
     
     def img_reconstruction(self, hashtable, img, multi_channel=True):
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        # if multi_channel == False:
-        #     BA,HI,WI = img.shape
-        #     sigle_img_idx = torch.empty((0)).to(device)
-        #     for key in hashtable.keys():
-        #         sigle_img_idx = torch.concat([sigle_img_idx, hashtable[key]])
-        #     all_idx = torch.empty((0)).to(device)
-        #     for batch in range(BA):
-        #         all_idx = torch.concat([all_idx, sigle_img_idx + HI*WI*batch])
-        #     return img.take(all_idx.long()).reshape(-1, HI*WI, B)
-
         B,C,H,W = img.shape
-        # H=25
-        # W=25
-        sigle_img_idx = torch.empty((0))
-        for key in hashtable.keys():
-            idx = hashtable[key]
-            for channel in range(idx.shape[0]):
-                sigle_img_idx = torch.concat([sigle_img_idx, idx[channel] + H*W*channel])
-        all_idx = torch.empty((0))
-        for batch in range(B):
-            all_idx = torch.concat([all_idx, sigle_img_idx + H*W*C*batch])
-        # final_img = img.take(all_idx.long().to(device)).reshape(-1, H*W, B).transpose(0,1)
-        # final_img = img.take(all_idx.long().to(device)).reshape(-1, H*W, B).transpose(0,1)
-        final_img = img.take(all_idx.long().to(device)).reshape(B, H*W, -1).permute(1,2,0)
+        hashtable = hashtable[:self.pixel_number*B].reshape(-1)
+        final_img = img.take(hashtable.long().to(device)).reshape(B, H*W, -1).permute(1,2,0)
         return final_img

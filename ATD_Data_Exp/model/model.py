@@ -5,22 +5,22 @@ from torch.utils.data import Dataset,DataLoader
 import time
 from model.ABC_Layer import ABC_2D
 
-# class RowWiseLinear(nn.Module):
-#     def __init__(self, height, width):
-#         super().__init__()
-#         self.height = height
-#         self.width = width
-#         self.weights = nn.Parameter(torch.ones(height, 1, width))
-#         self.register_parameter('weights', self.weights)
-#         # self.weights = nn.Parameter(weights)
-#         # self.weights = torch.ones(height, 1, width).to('cuda')
-#         # self.register_buffer('mybuffer', self.weights)
+class RowWiseLinear(nn.Module):
+    def __init__(self, height, width, out_width):
+        super().__init__()
+        self.height = height
+        self.width = width
+        self.weights = nn.Parameter(torch.ones(height, out_width, width))
+        self.register_parameter('weights', self.weights)
+        # self.weights = nn.Parameter(weights)
+        # self.weights = torch.ones(height, 1, width).to('cuda')
+        # self.register_buffer('mybuffer', self.weights)
 
         
-#     def forward(self, x):
-#         x_unsqueezed = x.unsqueeze(-1)
-#         w_times_x = torch.matmul(self.weights, x_unsqueezed)
-#         return w_times_x.squeeze()
+    def forward(self, x):
+        x_unsqueezed = x.unsqueeze(-1)
+        w_times_x = torch.matmul(self.weights, x_unsqueezed)
+        return w_times_x.squeeze()
 
 
 class ABC_Net(nn.Module):
@@ -47,7 +47,9 @@ class ABC_Net(nn.Module):
                           kernel_number_per_pixel=self.args.knpp,
                           hash=self.hash)
 
-        self.fc1 = nn.Linear(self.args.knpp*self.pixel_number, self.predict_len*self.pixel_number)
+        self.rwl = RowWiseLinear(5200, self.args.knpp, out_width=self.args.predict_len)
+
+        # self.fc1 = nn.Linear(self.args.knpp*self.pixel_number, self.args.predict_len*self.pixel_number)
         self.relu = nn.ReLU(inplace=True)
 
     def forward(self, x):
@@ -57,8 +59,9 @@ class ABC_Net(nn.Module):
         x = self.relu(x)
         # B, kernel_number_per_pixel, H*W
 
-        x = x.reshape(B, -1)
-        x = self.fc1(x)
+        x = x.transpose(1,2)
+        # x = self.fc1(x)
+        x = self.rwl(x)
         # B, 4*5200
         x = x.reshape(B, self.args.predict_len, H, W)
         return x

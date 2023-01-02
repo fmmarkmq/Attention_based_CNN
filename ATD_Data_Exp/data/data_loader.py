@@ -13,6 +13,7 @@ class atd_dataset(Dataset):
         self.history_len = history_len
         self.predict_len = predict_len
         self.data = torch.tensor(df[:-self.predict_len].values).unsqueeze(dim=-1)
+        # print(self.data1.shape)
         self.__read_data__()
 
 
@@ -22,8 +23,8 @@ class atd_dataset(Dataset):
 
     def __read_data__(self):
         df = self.df
-        self.data = df.values.astype(float)
-        self.data_1 = df.sort_index(axis=1, level=1).values
+        self.data1 = df.values.astype(float)
+        # self.data_1 = df.sort_index(axis=1, level=1).values
 
     
     def __getitem__(self,idx):
@@ -32,14 +33,15 @@ class atd_dataset(Dataset):
         predict_len = self.predict_len
         
         begin = idx
-        train_x = self.data[begin : begin+history_len].reshape(history_len, 1, 5200)
+        train_x = self.data1[begin : begin+history_len].reshape(history_len, 1, 5200)
         
-        train_x1 = self.data_1[begin : begin+history_len]
-        train_y = self.data[begin+history_len : begin+history_len+predict_len].reshape(predict_len, 1, 5200)
+        # train_x1 = self.data_1[begin : begin+history_len]
+        train_y = self.data1[begin+history_len : begin+history_len+predict_len].reshape(predict_len, 1, 5200)
 
         #print("check input dim", train_x.shape, train_y.shape)
 
         # return train_x, train_x1, train_y
+        # print(train_x.shape)
         return train_x, train_y
 
 
@@ -69,8 +71,9 @@ class atd_Pred(Dataset):
 
 
 class ABC_data_loader(object):
-    def __init__(self, args):
+    def __init__(self, args, df):
         self.args = args
+        self.df = df
         self.train = self.train_data_loader()
         self.predict = self.predict_data_loader()
 
