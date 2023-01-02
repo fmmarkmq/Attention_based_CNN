@@ -20,7 +20,7 @@ class RowWiseLinear(nn.Module):
     def forward(self, x):
         x_unsqueezed = x.unsqueeze(-1)
         w_times_x = torch.matmul(self.weights, x_unsqueezed)
-        return w_times_x.squeeze()
+        return w_times_x
 
 
 class ABC_Net(nn.Module):
@@ -55,6 +55,7 @@ class ABC_Net(nn.Module):
     def forward(self, x):
         # start_time = time.time
         B,C,H,W = x.shape
+        # print(x.shape)
         x = self.ABC_2D(x)
         x = self.relu(x)
         # B, kernel_number_per_pixel, H*W
@@ -63,7 +64,10 @@ class ABC_Net(nn.Module):
         # x = self.fc1(x)
         x = self.rwl(x)
         # B, 4*5200
-        x = x.reshape(B, self.args.predict_len, H, W)
+        # print(x.shape)
+        x = x.permute(0,2,3,1)
+        # print("out: ",x.shape)
+        # x = x.reshape(B, self.args.predict_len, H, W)
         return x
 
 

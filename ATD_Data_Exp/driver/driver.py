@@ -43,6 +43,7 @@ class ABC_Driver(object):
                 inputs=inputs.to(device)
                 labels=labels.to(device)
                 model_optim.zero_grad(set_to_none = True)
+                # print("label:", labels.shape)
                 # print(inputs.shape)
                 preds = model(inputs)
                 loss = criterion(preds,labels)
@@ -72,7 +73,7 @@ class ABC_Driver(object):
     #     last_idx=tmp.index[-len(new_rows):]
     #     new_df = pd.DataFrame(new_rows, index=last_idx+self.args.predict_len, columns=tmp.columns)
     #     tmp = pd.concat([tmp, new_df])
-    
+
         
     #     #tmp.insert(0, "timeStamps", tmp.index)
     #     self.df = tmp
@@ -184,7 +185,7 @@ class ABC_Driver(object):
             Num, Hi, Wi = data_mat1.shape
             data_mat1 = data_mat1.reshape(-1, Hi*Wi)
             cov  = torch.cov(data_mat1.T).abs()
-            val,idx = torch.topk(cov,k=9,dim=0,sorted=True,largest=True)
+            val,idx = torch.topk(cov,k=self.args.kernel_size,dim=0,sorted=True,largest=True)
             # idx_expanded = torch.unsqueeze(idx.T, axis = 1)
             # print(idx_expanded.shape)
             idx_list_channels.append(idx.T+channel*H*W)
