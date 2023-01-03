@@ -43,27 +43,12 @@ class ABC_Net(nn.Module):
                           hash=self.hash)
 
         # self.rwl = RowWiseLinear(5200, self.args.knpp, out_width=self.args.predict_len)
-        self.fc1 = nn.Linear(self.args.knpp2*self.args.input_height*self.args.input_width, 10)
-        # self.fc1 = nn.Linear(self.args.input_height*self.args.input_width, self.args.input_height*self.args.input_width)
+        # self.fc1 = nn.Linear(self.args.knpp2*self.args.input_height*self.args.input_width, 10)
+        self.fc1 = nn.Linear(self.args.input_height*self.args.input_width, self.args.input_height*self.args.input_width)
         self.relu = nn.ReLU(inplace=True)
         self.softmax = nn.Softmax(1)
     
-    # # atd_model
-    # def forward(self, x):
-    #     B,C,H,W = x.shape
-    #     x = self.ABC_2D(x)
-    #     x = self.relu(x)
-    #     # B, -1, H, W
-
-    #     x = self.ABC_2D_1(x)
-    #     x = self.relu(x)
-    #     # B, -1, H, W
-    #     x = self.fc1(x)
-    #     x = x.reshape(B, self.args.predict_len, H, W)
-    #     # B, 4, 1, 5200
-    #     return x
-
-    # mnist_model
+    # atd_model
     def forward(self, x):
         B,C,H,W = x.shape
         x = self.ABC_2D(x)
@@ -73,10 +58,25 @@ class ABC_Net(nn.Module):
         x = self.ABC_2D_1(x)
         x = self.relu(x)
         # B, -1, H, W
-        x = x.reshape(B, -1)
         x = self.fc1(x)
-        x = self.softmax(x)
+        x = x.reshape(B, self.args.predict_len, H, W)
+        # B, 4, 1, 5200
         return x
+
+    # # mnist_model
+    # def forward(self, x):
+    #     B,C,H,W = x.shape
+    #     x = self.ABC_2D(x)
+    #     x = self.relu(x)
+    #     # B, -1, H, W
+
+    #     x = self.ABC_2D_1(x)
+    #     x = self.relu(x)
+    #     # B, -1, H, W
+    #     x = x.reshape(B, -1)
+    #     x = self.fc1(x)
+    #     x = self.softmax(x)
+    #     return x
 
 
 
@@ -85,7 +85,7 @@ class ABC_Net(nn.Module):
 
 
 # class ABC_Net(nn.Module):
-#     def __init__(self, args):
+#     def __init__(self, args, hash):
 #         super(ABC_Net, self).__init__()
 #         self.args = args
 

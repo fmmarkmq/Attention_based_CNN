@@ -125,3 +125,46 @@ class ABC_Driver(object):
             # for i in range(self.args.input_channel):
             #     full_idx = torch.concat([full_idx, full_idx_list + i*H*W], axis=1)
             return full_idx_list
+        
+    # def get_surrounding_pixel_indices(self, grid, center_index):
+    #     # Calculate the number of rows and columns in the grid
+    #     num_rows = len(grid)
+    #     num_cols = len(grid[0])
+        
+    #     # Calculate the row and column indices of the center pixel
+    #     center_row = center_index // num_cols
+    #     center_col = center_index % num_cols
+        
+    #     # Initialize an empty list to store the indices of the surrounding pixels
+    #     surrounding_pixel_indices = []
+        
+    #     # Iterate over the rows and columns in a 3x3 grid centered on the center pixel
+    #     for row in range(center_row-1, center_row+2):
+    #         for col in range(center_col-1, center_col+2):
+    #             # Check if the current row and column indices are valid (i.e., within the bounds of the grid)
+    #             if (row >= 0 and row < num_rows) and (col >= 0 and col < num_cols):
+    #                 # If the current row and column indices are valid, calculate the index of the pixel at that position and add it to the list of surrounding pixel indices
+    #                 surrounding_pixel_indices.append(row * num_cols + col)
+        
+    #     # Return the list of surrounding pixel indices, excluding the index of the center pixel itself
+    #     spi = [index for index in surrounding_pixel_indices]
+    #     if len(spi)<9:
+    #         spi = spi + [center_index]*(9-len(spi))
+    #     return spi
+
+    # def xy_to_idx(self, x: int, y: int, board_size: int = 28) -> int:
+    #     return x * board_size + y
+
+    # def get_cov_hashTable(self, data_mat):
+    #     data_shape = data_mat.shape
+    #     data_mat=  data_mat.reshape(data_shape[0], -1, data_shape[-2], data_shape[-1])
+    #     B,C,H,W = data_mat.shape
+    #     idx_list_channels = []
+    #     for i in range(28):
+    #         for j in range(28):
+    #             center_idx = self.xy_to_idx(i,j)
+    #             idx_lst = self.get_surrounding_pixel_indices(np.empty([H,W]), center_idx)
+    #             idx_list_channels.append(torch.tensor([idx_lst]))
+    #     hash = torch.concat(idx_list_channels, axis=0)
+    #     # return {int(row[0][-1]): row for i, row in enumerate(idx_list_channels)}
+    #     return hash
