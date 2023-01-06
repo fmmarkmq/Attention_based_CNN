@@ -28,7 +28,7 @@ class ABC_Forecaster():
         model = self.model
         if "timeStamps" in self.df.columns:
             self.df = self.df.drop(["timeStamps"], axis=1)
-        new_rows = model.predict().squeeze().cpu().detach().numpy()
+        new_rows = model.predict().squeeze(0).squeeze(1).cpu().detach().numpy()
         new_df = pd.DataFrame(new_rows, index=indicies, columns=self.df.columns)
         return new_df
 
@@ -54,7 +54,7 @@ class ABC_Forecaster():
 
         if self.args.if_filter_constant:
             data_back_df = pd.DataFrame(data_back, columns=self.df.columns)
-            data_back_df[self.constant_columns] = self.df.iloc[-4:][self.constant_columns].values
+            data_back_df[self.constant_columns] = self.df.iloc[-self.args.predict_len:][self.constant_columns].values
             return data_back_df
         return pd.DataFrame(data_back, columns=self.df.columns)
 

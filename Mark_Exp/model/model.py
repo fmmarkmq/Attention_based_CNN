@@ -44,7 +44,8 @@ class ABC_Net(nn.Module):
 
         # self.rwl = RowWiseLinear(5200, self.args.knpp, out_width=self.args.predict_len)
         # self.fc1 = nn.Linear(self.args.knpp2*self.args.input_height*self.args.input_width, 10)
-        self.fc1 = nn.Linear(self.args.input_height*self.args.input_width, self.args.input_height*self.args.input_width)
+        self.fc1 = nn.Linear(self.args.knpp2, self.args.predict_len)
+        self.fc2 = nn.Linear(self.args.input_height*self.args.input_width, self.args.input_height*self.args.input_width)
         self.relu = nn.ReLU(inplace=True)
         self.softmax = nn.Softmax(1)
     
@@ -58,7 +59,10 @@ class ABC_Net(nn.Module):
         x = self.ABC_2D_1(x)
         x = self.relu(x)
         # B, -1, H, W
+        x = x.transpose(1,3)
         x = self.fc1(x)
+        x = x.transpose(1,3)
+        x = self.fc2(x)
         x = x.reshape(B, self.args.predict_len, H, W)
         # B, 4, 1, 5200
         return x
