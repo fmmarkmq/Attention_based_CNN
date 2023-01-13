@@ -28,7 +28,7 @@ class ABC_Forecaster():
         model = self.model
         if "timeStamps" in self.df.columns:
             self.df = self.df.drop(["timeStamps"], axis=1)
-        new_rows = model.predict().squeeze(0).squeeze(1).cpu().detach().numpy()
+        new_rows = model.predict().squeeze(1).squeeze(0).cpu().detach().numpy()
         new_df = pd.DataFrame(new_rows, index=indicies, columns=self.df.columns)
         return new_df
 

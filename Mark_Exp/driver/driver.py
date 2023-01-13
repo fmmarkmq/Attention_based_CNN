@@ -12,7 +12,7 @@ from sklearn.metrics import accuracy_score
 from sklearn.metrics import f1_score
 from sklearn.metrics import recall_score
 
-from model.model import ABC_Net
+from model.model import ABC_Net, CNN_Net
 from data.data_loader import ABC_Data_Loader
 
 class ABC_Driver(object):
@@ -81,8 +81,12 @@ class ABC_Driver(object):
         return device
     
     def _build_model(self):
-        self.hash = self.get_cov_hashTable(self.data_loader.train.dataset.data)
-        model = ABC_Net(self.args, self.hash).to(self.device)
+        if self.args.model == 'abc':
+            # self.hash = self.get_cov_hashTable(self.data_loader.train.dataset.data)
+            self.hash = self.get_hash(self.data_loader.train.dataset.data)
+            model = ABC_Net(self.args, self.hash).to(self.device)
+        elif self.args.model == 'cnn':
+            model = CNN_Net(self.args).to(self.device)
         return model
     
     def _build_data_loader(self):
@@ -105,11 +109,11 @@ class ABC_Driver(object):
             criterion = nn.MSELoss()
         return criterion
 
-    def get_cov_hashTable(self, data_mat:torch.tensor):
+    def get_hash(self, data_mat:torch.tensor):
             data_shape = data_mat.shape
             data_mat=  data_mat.reshape(data_shape[0], -1, data_shape[-2], data_shape[-1])
             B,C,H,W = data_mat.shape
-            idx_list_channels = []
+            hash = torch.empty((0))
             for channel in range(C):
                 data_mat1 = data_mat[:,channel,:]
                 Num, Hi, Wi = data_mat1.shape
@@ -118,14 +122,10 @@ class ABC_Driver(object):
                 var = torch.var(data_mat1.to(torch.float32), axis=1).abs()
                 var[var<0.01] = var[var<0.01] + 1
                 corr = (cov/var.pow(0.5)).T/var.pow(0.5)
-                val,idx = torch.topk(corr,k=self.args.kernel_size,dim=0,sorted=True,largest=True)
-                idx_list_channels.append(idx.T+channel*H*W)
-            full_idx_list = torch.concat(idx_list_channels, axis=1)
-            # full_idx = torch.empty((0))
-            # for i in range(self.args.input_channel):
-            #     full_idx = torch.concat([full_idx, full_idx_list + i*H*W], axis=1)
-            return full_idx_list
-        
+                val,idx = torch.topk(corr,k=H*W,dim=1,sorted=True,largest=True)
+                hash = torch.concat([hash, idx.reshape(H, W, H*W).unsqueeze(0)], axis=0)
+            return hash
+    
     # def get_surrounding_pixel_indices(self, grid, center_index):
     #     # Calculate the number of rows and columns in the grid
     #     num_rows = len(grid)
