@@ -3,7 +3,7 @@ from torch import nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset,DataLoader
 import time
-from model.ABC_Layer import ABC_2D_Agnotic, ABC_2D_Specific, ABC_2D_Large
+from model.ABC_Layer import ABC_2D_Agnostic, ABC_2D_Specific, ABC_2D_Large
 
 class RowWiseLinear(nn.Module):
     def __init__(self, height, width, out_width):
@@ -22,127 +22,61 @@ class RowWiseLinear(nn.Module):
         w_times_x = torch.matmul(self.weights, x_unsqueezed)
         return w_times_x
 
+class Linear_with_process(nn.Module):
+    def __init__(self, in_features, out_features, in_dim=None, out_dim=None, unflatten=None):
+        super().__init__()
+        self.in_dim = in_dim
+        self.out_dim = out_dim
+        self.unflatten = unflatten
+        self.fc = nn.Linear(in_features, out_features)
+    
+    def forward(self, x):
+        if self.in_dim is not None:
+            x = x.permute(*tuple(i for i in range(len(x.shape)) if i not in self.in_dim), *self.in_dim)
+            x = x.flatten(-len(self.in_dim), -1)
+        x = self.fc(x)
+        if self.out_dim is not None:
+            out_permute_index = list(range(len(x.shape)-1))
+            out_permute_index.insert(self.out_dim, len(x.shape)-1)
+            x = x.permute(tuple(out_permute_index))
+        if self.unflatten is not None:
+            x = x.unflatten(self.out_dim, self.unflatten)
+        return x
+
 
 class ABC_Net(nn.Module):
     def __init__(self, args, hash):
         super(ABC_Net, self).__init__()
         self.args = args
         self.hash = hash
-        self.pixel_number = self.args.input_height * self.args.input_width
-
-        self.ABC_2D = ABC_2D_Specific(in_channel=self.args.input_channel,
-                          kernel_size=self.args.kernel_size,
-                          pixel_number=self.pixel_number,
-                          kernel_number_per_pixel=self.args.knpp,
-                          hash=self.hash)
-        
-        self.ABC_2D_1 = ABC_2D_Agnotic(in_channel=self.args.knpp,
-                          kernel_size=self.args.kernel_size,
-                          pixel_number=self.pixel_number,
-                          kernel_number_per_pixel=self.args.knpp2,
-                          hash=self.hash)
-
-        # self.ABC_2D = ABC_2D_Large(in_channel=self.args.input_channel,
-        #                   kernel_size=(5,5),
-        #                   perceptual_size=self.args.kernel_size,
-        #                   out_channel=self.args.knpp,
-        #                   hash=self.hash)
-        # self.ABC_2D_1 = ABC_2D_Large(in_channel=self.args.knpp,
-        #                   kernel_size=(5,5),
-        #                   perceptual_size=self.args.kernel_size,
-        #                   out_channel=self.args.knpp2,
-        #                   hash=self.hash)
-        
-        if self.args.name == "mnist":
-            self.fc1 = nn.Linear(self.args.knpp2*self.args.input_height*self.args.input_width, 10)
-        elif self.args.name == "atd":
-            # self.rwl = RowWiseLinear(5200, self.args.knpp, out_width=self.args.predict_len)
-            # self.fc1 = nn.Linear(self.args.knpp2, self.args.predict_len)
-            # self.fc2 = nn.Linear(self.args.input_height*self.args.input_width, self.args.input_height*self.args.input_width)
-            self.fc1 = nn.Linear(self.args.knpp2, 1)
-            self.fc2 = nn.Linear(self.args.input_height, self.args.predict_len)
-        
-        self.relu = nn.ReLU(inplace=True)
-        self.softmax = nn.Softmax(1)
+        self.full_modules = self._make_modules(self.args.layers, self.hash)
     
     def forward(self,x):
-        if self.args.name == "mnist":
-            return self.mnist_forward(x)
-        elif self.args.name == "atd":
-            return self.atd_forward(x)
-
-    # atd_model
-    def atd_forward(self, x):
         B,C,H,W = x.shape
-        x = self.ABC_2D(x)
-        x = self.relu(x)
-        # B, -1, H, W
-
-        x = self.ABC_2D_1(x)
-        x = self.relu(x)
-        # B, -1, H, W
-        x = x.transpose(1,3)
-        x = self.fc1(x)
-        # x = x.transpose(1,3)
-        x = x.permute(0,3,1,2)
-        x = self.fc2(x) 
-        x = x.permute(0,3,1,2)
-        x = x.reshape(B, 1, self.args.predict_len, W)
-        # B, 4, 1, 5200
+        for i, module in enumerate(self.full_modules):
+            x = module(x)
         return x
 
-    # mnist_model
-    def mnist_forward(self, x):
-        B,C,H,W = x.shape
-        x = self.ABC_2D(x)
-        x = self.relu(x)
-        # B, -1, H, W
-
-        x = self.ABC_2D_1(x)
-        x = self.relu(x)
-        # B, -1, H, W
-        x = x.reshape(B, -1)
-        x = self.fc1(x)
-        x = self.softmax(x)
-        return x
-
-
-class CNN_Net(nn.Module):
-    def __init__(self, args):
-        super(CNN_Net, self).__init__()
-        self.args = args
-
-        self.conv1 = nn.Conv2d(
-            in_channels = self.args.input_channel,
-            out_channels = self.args.knpp,
-            kernel_size = 3,
-            stride = 1,
-            padding= 1,
-            bias=False
-        )
-        self.conv2 = nn.Conv2d(
-            in_channels=self.args.knpp,
-            out_channels = self.args.knpp2,
-            kernel_size=3,
-            stride = 1,
-            padding= 1,
-            bias=False
-        )
-        self.fc1 = nn.Linear(self.args.knpp2*28*28, 10)
-        self.relu = nn.ReLU(inplace=True)
-        self.pool = nn.MaxPool2d(kernel_size=2)
-        self.softmax = nn.Softmax(1)
-    
-    def forward(self, x):
-        # start_time = time.time
-        B,C,H,W = x.shape
-        x = self.conv1(x)
-        x = self.relu(x)
-        x = self.conv2(x)
-        x = self.relu(x)
-
-        x = x.view(B, -1)
-
-        x = self.fc1(x)
-        x = self.softmax(x)
-        return x
+    def _make_modules(self, layers, hash):
+        modules = nn.ModuleList([])
+        for layer_name, paras in layers:
+            if layer_name=='specific':
+                modules.append(ABC_2D_Specific(*paras, hash=hash))
+                modules.append(nn.ReLU(inplace=True))
+            elif layer_name=='agnostic':
+                modules.append(ABC_2D_Agnostic(*paras, hash=hash))
+                modules.append(nn.ReLU(inplace=True))
+            elif layer_name=='large':
+                modules.append(ABC_2D_Large(*paras, hash=hash))
+                modules.append(nn.ReLU(inplace=True))
+            elif layer_name=='cnn2d':
+                modules.append(nn.Conv2d(*paras))
+                modules.append(nn.ReLU)
+            elif layer_name=='cnn1d':
+                modules.append(nn.Conv1d(*paras))
+                modules.append(nn.ReLU)
+            elif layer_name=='linear':
+                modules.append(Linear_with_process(*paras))
+            elif layer_name=='softmax':
+                modules.append(nn.Softmax(paras))
+        return modules

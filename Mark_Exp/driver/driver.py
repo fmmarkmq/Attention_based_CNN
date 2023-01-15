@@ -81,12 +81,9 @@ class ABC_Driver(object):
         return device
     
     def _build_model(self):
-        if self.args.model == 'abc':
-            # self.hash = self.get_cov_hashTable(self.data_loader.train.dataset.data)
-            self.hash = self.get_hash(self.data_loader.train.dataset.data)
-            model = ABC_Net(self.args, self.hash).to(self.device)
-        elif self.args.model == 'cnn':
-            model = CNN_Net(self.args).to(self.device)
+        # self.hash = self.get_cov_hashTable(self.data_loader.train.dataset.data)
+        self.hash = self.get_hash(self.data_loader.train.dataset.data)
+        model = ABC_Net(self.args, self.hash).to(self.device)
         return model
     
     def _build_data_loader(self):
@@ -110,21 +107,24 @@ class ABC_Driver(object):
         return criterion
 
     def get_hash(self, data_mat:torch.tensor):
-            data_shape = data_mat.shape
-            data_mat=  data_mat.reshape(data_shape[0], -1, data_shape[-2], data_shape[-1])
-            B,C,H,W = data_mat.shape
-            hash = torch.empty((0))
-            for channel in range(C):
-                data_mat1 = data_mat[:,channel,:]
-                Num, Hi, Wi = data_mat1.shape
-                data_mat1 = data_mat1.reshape(-1, Hi*Wi).T
-                cov = torch.cov(data_mat1).abs()
-                var = torch.var(data_mat1.to(torch.float32), axis=1).abs()
-                var[var<0.01] = var[var<0.01] + 1
-                corr = (cov/var.pow(0.5)).T/var.pow(0.5)
-                val,idx = torch.topk(corr,k=H*W,dim=1,sorted=True,largest=True)
-                hash = torch.concat([hash, idx.reshape(H, W, H*W).unsqueeze(0)], axis=0)
-            return hash
+        if self.args.name == 'cifar10':
+            data_mat = data_mat.permute(0,3,1,2)
+        # data_mat = data_mat[:,:,0,:]
+        data_shape = data_mat.shape
+        data_mat=  data_mat.reshape(data_shape[0], -1, data_shape[-2], data_shape[-1])
+        B,C,H,W = data_mat.shape
+        hash = torch.empty((0))
+        for channel in range(C):
+            data_mat1 = data_mat[:,channel,:]
+            Num, Hi, Wi = data_mat1.shape
+            data_mat1 = data_mat1.reshape(-1, Hi*Wi).T
+            cov = torch.cov(data_mat1).abs()
+            var = torch.var(data_mat1.to(torch.float32), axis=1).abs()
+            var[var<0.01] = var[var<0.01] + 1
+            corr = (cov/var.pow(0.5)).T/var.pow(0.5)
+            val,idx = torch.topk(corr,k=H*W,dim=1,sorted=True,largest=True)
+            hash = torch.concat([hash, idx.reshape(H, W, H*W).unsqueeze(0)], axis=0)
+        return hash
     
     # def get_surrounding_pixel_indices(self, grid, center_index):
     #     # Calculate the number of rows and columns in the grid

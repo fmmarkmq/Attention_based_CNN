@@ -48,9 +48,12 @@ class ABC_Forecaster():
             data_back = self._verse_normalize_data(data,  self.mean, self.std)
         else:
             data_back = data
+        
+        if self.args.if_round:
+            data_back = np.round(data_back)
 
-        data_back = np.round(data_back)
-        data_back[data_back < 0] = 0
+        if self.args.if_positive:
+            data_back[data_back < 0] = 0
 
         if self.args.if_filter_constant:
             data_back_df = pd.DataFrame(data_back, columns=self.df.columns)
