@@ -62,18 +62,23 @@ class ABC_Net(nn.Module):
         for layer_name, paras in layers:
             if layer_name=='specific':
                 modules.append(ABC_2D_Specific(*paras, hash=hash))
+                modules.append(nn.BatchNorm2d(paras[1]))
                 modules.append(nn.ReLU(inplace=True))
             elif layer_name=='agnostic':
                 modules.append(ABC_2D_Agnostic(*paras, hash=hash))
+                modules.append(nn.BatchNorm2d(paras[1]))
                 modules.append(nn.ReLU(inplace=True))
             elif layer_name=='large':
                 modules.append(ABC_2D_Large(*paras, hash=hash))
+                modules.append(nn.BatchNorm2d(paras[1]))
                 modules.append(nn.ReLU(inplace=True))
             elif layer_name=='cnn2d':
                 modules.append(nn.Conv2d(*paras))
+                modules.append(nn.BatchNorm2d(paras[1]))
                 modules.append(nn.ReLU(inplace=True))
             elif layer_name=='cnn1d':
                 modules.append(nn.Conv1d(*paras))
+                modules.append(nn.BatchNorm2d(paras[1]))
                 modules.append(nn.ReLU(inplace=True))
             elif layer_name=='linear':
                 modules.append(Linear_with_process(*paras))
