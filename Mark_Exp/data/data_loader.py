@@ -36,7 +36,7 @@ class ABC_Data_Loader(object):
                                                         torchvision.transforms.Normalize((0.1307,), (0.3081,))])
             dataset = torchvision.datasets.MNIST('../../data/ABC/mnist', train=False, download=True, transform=transform)
             predict = torch.utils.data.DataLoader(dataset, batch_size=self.args.predict.batch_size, shuffle=False)
-        elif self.args.name == "CIFAR10":
+        elif self.args.name == "cifar10":
             transform = torchvision.transforms.Compose([torchvision.transforms.ToTensor(),
                                                         torchvision.transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
             testset = torchvision.datasets.CIFAR10(root='../../data/ABC/CIFAR10', train=False, download=True, transform=transform)

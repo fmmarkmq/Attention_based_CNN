@@ -12,7 +12,7 @@ from sklearn.metrics import accuracy_score
 from sklearn.metrics import f1_score
 from sklearn.metrics import recall_score
 
-from model.model import ABC_Net, CNN_Net
+from model.model import ABC_Net
 from data.data_loader import ABC_Data_Loader
 
 class ABC_Driver(object):
@@ -108,7 +108,7 @@ class ABC_Driver(object):
 
     def get_hash(self, data_mat:torch.tensor):
         if self.args.name == 'cifar10':
-            data_mat = data_mat.permute(0,3,1,2)
+            data_mat = torch.tensor(data_mat).permute(0,3,1,2)
         # data_mat = data_mat[:,:,0,:]
         data_shape = data_mat.shape
         data_mat=  data_mat.reshape(data_shape[0], -1, data_shape[-2], data_shape[-1])

@@ -71,10 +71,10 @@ class ABC_Net(nn.Module):
                 modules.append(nn.ReLU(inplace=True))
             elif layer_name=='cnn2d':
                 modules.append(nn.Conv2d(*paras))
-                modules.append(nn.ReLU)
+                modules.append(nn.ReLU(inplace=True))
             elif layer_name=='cnn1d':
                 modules.append(nn.Conv1d(*paras))
-                modules.append(nn.ReLU)
+                modules.append(nn.ReLU(inplace=True))
             elif layer_name=='linear':
                 modules.append(Linear_with_process(*paras))
             elif layer_name=='softmax':

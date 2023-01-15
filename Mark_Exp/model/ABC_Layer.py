@@ -8,7 +8,7 @@ import gc
 
 
 class ABC_2D_Agnostic(nn.Module):
-    def __init__(self, in_channel, pixel_number, kernel_size, kernel_number_per_pixel, hash, batch_size=100, if_bias=False):
+    def __init__(self, in_channel, kernel_number_per_pixel, kernel_size, pixel_number, hash, batch_size=100, if_bias=False):
         super().__init__()
         self.in_channel = in_channel
         self.pixel_number = pixel_number
@@ -69,7 +69,7 @@ class ABC_2D_Agnostic(nn.Module):
 
 
 class ABC_2D_Specific(nn.Module):
-    def __init__(self, in_channel, pixel_number, kernel_size, kernel_number_per_pixel, hash, batch_size=100, if_bias=False):
+    def __init__(self, in_channel, kernel_number_per_pixel, kernel_size, pixel_number, hash, batch_size=100, if_bias=False):
         super().__init__()
         self.in_channel = in_channel
         self.pixel_number = pixel_number
@@ -131,7 +131,7 @@ class ABC_2D_Specific(nn.Module):
 
 
 class ABC_2D_Large(nn.Module):
-    def __init__(self, in_channel, kernel_size, perceptual_size, out_channel, hash, batch_size=100):
+    def __init__(self, in_channel, out_channel, kernel_size, perceptual_size, hash, batch_size=100):
         super().__init__()
         self.hash = hash
         self.in_channel = in_channel
