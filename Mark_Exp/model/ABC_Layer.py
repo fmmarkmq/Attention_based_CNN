@@ -58,7 +58,7 @@ class ABC_2D_Agnostic(nn.Module):
         new_hash = pooled_hash.reshape(HC, HH_new, HW_new, HH_new, pool_size[0], HW_new, pool_size[1])
         new_hash = new_hash.permute(0,1,2,3,5,4,6).flatten(-2,-1)
         i = hashtable_mean_argmax.unsqueeze(1).unsqueeze(1).repeat(1,HH_new,HW_new,1,1).unsqueeze(-1)
-        new_hash = torch.gather(new_hash, -1, i).squeeze(-1).reshape(HC,HH_new,HH_new,HH_new*HW_new)
+        new_hash = torch.gather(new_hash, -1, i).squeeze(-1).reshape(HC,HH_new,HW_new,HH_new*HW_new)
         return pooled_hash, new_hash
 
     def _build_full_hash(self, hashtable):
@@ -141,7 +141,7 @@ class ABC_2D_Specific(nn.Module):
         new_hash = pooled_hash.reshape(HC, HH_new, HW_new, HH_new, pool_size[0], HW_new, pool_size[1])
         new_hash = new_hash.permute(0,1,2,3,5,4,6).flatten(-2,-1)
         i = hashtable_mean_argmax.unsqueeze(1).unsqueeze(1).repeat(1,HH_new,HW_new,1,1).unsqueeze(-1)
-        new_hash = torch.gather(new_hash, -1, i).squeeze(-1).reshape(HC,HH_new,HH_new,HH_new*HW_new)
+        new_hash = torch.gather(new_hash, -1, i).squeeze(-1).reshape(HC,HH_new,HW_new,HH_new*HW_new)
         return pooled_hash, new_hash
 
     def _build_full_hash(self, hashtable):
