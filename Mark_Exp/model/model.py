@@ -16,13 +16,12 @@ class RowWiseLinear(nn.Module):
         # self.weights = torch.ones(height, 1, width).to('cuda')
         # self.register_buffer('mybuffer', self.weights)
 
-        
     def forward(self, x):
         x_unsqueezed = x.unsqueeze(-1)
         w_times_x = torch.matmul(self.weights, x_unsqueezed)
         return w_times_x
 
-class Linear_with_process(nn.Module):
+class Linear_Module(nn.Module):
     def __init__(self, in_features, out_features, in_dim=None, out_dim=None, unflatten=None):
         super().__init__()
         self.in_dim = in_dim
@@ -42,7 +41,45 @@ class Linear_with_process(nn.Module):
         if self.unflatten is not None:
             x = x.unflatten(self.out_dim, self.unflatten)
         return x
-
+    
+class Conv_Module(nn.Module):
+    def __init__(self, layer_name, paras, hash=None):
+        super().__init__()
+        self.name = layer_name
+        if hash is not None:
+            para_list = list(paras)
+            para_list.insert(4, hash)
+            self.paras = tuple(para_list)
+        else:
+            self.paras = paras
+        self.hash = hash
+        if layer_name=='specific':
+            self.conv = ABC_2D_Specific(*self.paras)
+            self.maxpool = nn.MaxPool2d(paras[-1])
+        elif layer_name=='agnostic':
+            self.conv = ABC_2D_Agnostic(*self.paras)
+            self.maxpool = nn.MaxPool2d(paras[-1])
+        elif layer_name=='large':
+            self.conv = ABC_2D_Large(*self.paras)
+            self.maxpool = nn.MaxPool2d(paras[-1])
+        elif layer_name=='cnn2d':
+            self.conv = nn.Conv2d(*self.paras)
+            self.maxpool = nn.MaxPool2d(paras[-2])
+        elif layer_name=='cnn1d':
+            self.conv = nn.Conv1d(*self.paras)
+            self.maxpool = nn.MaxPool2d(paras[-2])
+        self.fc = nn.Linear(self.paras[0], self.paras[1])
+        self.norm = nn.BatchNorm2d(self.paras[1])
+        self.activate = nn.ReLU(inplace=True)
+        
+    
+    def forward(self, inputs):
+        x = inputs
+        x = self.conv(x)
+        x = self.norm(x)
+        x = x + self.fc(self.maxpool(inputs).transpose(1,3)).transpose(1,3)
+        x = self.activate(x)
+        return x
 
 class ABC_Net(nn.Module):
     def __init__(self, args, hash):
@@ -60,28 +97,14 @@ class ABC_Net(nn.Module):
     def _make_modules(self, layers, hash):
         modules = nn.ModuleList([])
         for layer_name, paras in layers:
-            if layer_name=='specific':
-                modules.append(ABC_2D_Specific(*paras, hash=hash))
-                modules.append(nn.BatchNorm2d(paras[1]))
-                modules.append(nn.ReLU(inplace=True))
-            elif layer_name=='agnostic':
-                modules.append(ABC_2D_Agnostic(*paras, hash=hash))
-                modules.append(nn.BatchNorm2d(paras[1]))
-                modules.append(nn.ReLU(inplace=True))
-            elif layer_name=='large':
-                modules.append(ABC_2D_Large(*paras, hash=hash))
-                modules.append(nn.BatchNorm2d(paras[1]))
-                modules.append(nn.ReLU(inplace=True))
-            elif layer_name=='cnn2d':
-                modules.append(nn.Conv2d(*paras))
-                modules.append(nn.BatchNorm2d(paras[1]))
-                modules.append(nn.ReLU(inplace=True))
-            elif layer_name=='cnn1d':
-                modules.append(nn.Conv1d(*paras))
-                modules.append(nn.BatchNorm2d(paras[1]))
-                modules.append(nn.ReLU(inplace=True))
+            if layer_name in ['specific', 'agnostic', 'large']:
+                module = Conv_Module(layer_name, paras, hash)
+                modules.append(module)
+                hash = module.conv.new_hash
+            elif layer_name in ['cnn2d', 'cnn1d']:
+                modules.append(Conv_Module(layer_name, paras))
             elif layer_name=='linear':
-                modules.append(Linear_with_process(*paras))
+                modules.append(Linear_Module(*paras))
             elif layer_name=='softmax':
                 modules.append(nn.Softmax(paras))
         return modules

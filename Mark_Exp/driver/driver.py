@@ -122,8 +122,10 @@ class ABC_Driver(object):
             var = torch.var(data_mat1.to(torch.float32), axis=1).abs()
             var[var<0.01] = var[var<0.01] + 1
             corr = (cov/var.pow(0.5)).T/var.pow(0.5)
-            val,idx = torch.topk(corr,k=H*W,dim=1,sorted=True,largest=True)
-            hash = torch.concat([hash, idx.reshape(H, W, H*W).unsqueeze(0)], axis=0)
+            # corr = corr[corr.mean(dim=1).argsort(descending=True)]
+            # val,idx = torch.topk(corr,k=H*W,dim=1,sorted=True,largest=True)
+            # idx = corr.argsort(dim=1, descending=True)
+            hash = torch.concat([hash, corr.reshape(H, W, H*W).unsqueeze(0)], axis=0)
         return hash
     
     # def get_surrounding_pixel_indices(self, grid, center_index):
