@@ -29,8 +29,9 @@ class ABC_Driver(object):
             train_loader = self.data_loader.train 
         model =self.model
         device = self.device
-        model_optim = self._select_optimizer()
         criterion = self._select_criterion()
+        model_optim = self._select_optimizer()
+        scheduler = CosineAnnealingWarmRestarts(model_optim, T_0=20, T_mult=2)
 
         model.train()
         for epoch in range(self.args.train_epochs):
@@ -44,6 +45,8 @@ class ABC_Driver(object):
                 train_loss.append(loss.item())
                 loss.backward()
                 model_optim.step()
+                if self.args.if_scheduler:
+                    scheduler.step()
             train_loss = np.average(train_loss)
             print(f'epoch: {epoch}, train_loss: {train_loss}')
         return self
