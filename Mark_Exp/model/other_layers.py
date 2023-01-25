@@ -3,6 +3,7 @@ from torch import nn
 import torch.nn.functional as F
 from torch import  Tensor
 import numpy as np
+import math
 
 class MLP(torch.nn.Module): 
     def __init__(self, in_features: list, out_features: list, dims, activation='relu'):
