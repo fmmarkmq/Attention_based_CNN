@@ -14,14 +14,17 @@ from sklearn.metrics import recall_score
 
 from model.model import ABC_Net
 from data.data_loader import ABC_Data_Loader
+from record.record import EXPERecords
 
 class ABC_Driver(object):
-    def __init__(self, args, data=None):
+    def __init__(self, args, data=None, record_path=None):
         self.args = args
         self.data = data
+        self.record_path = record_path
         self.device = self._acquire_device()
         self.data_loader = self._build_data_loader()
         self.model = self._build_model()
+        self.record = self._build_record()
         
 
     def train(self, train_loader=None):
@@ -31,11 +34,12 @@ class ABC_Driver(object):
         device = self.device
         criterion = self._select_criterion()
         model_optim = self._select_optimizer()
-        scheduler = CosineAnnealingWarmRestarts(model_optim, T_0=20, T_mult=2)
+        if self.args.if_scheduler:
+            scheduler = CosineAnnealingWarmRestarts(model_optim, T_0=20, T_mult=2)
 
-        model.train()
         for epoch in range(self.args.train_epochs):
             train_loss=[]
+            model.train()
             for idx, (inputs, labels) in enumerate(train_loader):
                 inputs=inputs.to(device)
                 labels=labels.to(device)
@@ -47,8 +51,7 @@ class ABC_Driver(object):
                 model_optim.step()
                 if self.args.if_scheduler:
                     scheduler.step()
-            train_loss = np.average(train_loss)
-            print(f'epoch: {epoch}, train_loss: {train_loss}')
+            self.record.add_outcome_to_record('epoch'+str(epoch), np.average(train_loss), self.metric(), if_print=True)
         return self
 
     def predict(self, pred_loader=None):
@@ -65,6 +68,8 @@ class ABC_Driver(object):
         return preds
 
     def metric(self, pred_loader=None):
+        if self.args.name not in ['cifar10','mnist']:
+            return None
         if pred_loader is None:
             pred_loader = self.data_loader.predict 
         y_true = pred_loader.dataset.targets
@@ -83,15 +88,22 @@ class ABC_Driver(object):
         self.device = device
         return device
     
+    def _build_data_loader(self):
+        data_loader = ABC_Data_Loader(self.args, self.data)
+        return data_loader
+    
     def _build_model(self):
         # self.hash = self.get_cov_hashTable(self.data_loader.train.dataset.data)
         self.hash = self.get_hash(self.data_loader.train.dataset.data)
         model = ABC_Net(self.args, self.hash).to(self.device)
         return model
     
-    def _build_data_loader(self):
-        data_loader = ABC_Data_Loader(self.args, self.data)
-        return data_loader
+    def _build_record(self):
+        if self.record_path is None:
+            self.record_path = 'record/records/' + self.args.name + '/'
+        record = EXPERecords(record_path=self.record_path, build_new_file=False)
+        record.add_record(self.args)
+        return record
     
     def _select_optimizer(self):
         model_optim = optim.Adam(self.model.parameters(), lr=self.args.lr)
@@ -114,7 +126,8 @@ class ABC_Driver(object):
             data_mat = torch.tensor(data_mat).permute(0,3,1,2)
         # data_mat = data_mat[:,:,0,:]
         data_shape = data_mat.shape
-        data_mat=  data_mat.reshape(data_shape[0], -1, data_shape[-2], data_shape[-1])
+        data_mat =  data_mat.reshape(data_shape[0], -1, data_shape[-2], data_shape[-1])
+        # data_mat = data_mat.mean(1)
         B,C,H,W = data_mat.shape
         hash = torch.empty((0))
         for channel in range(C):

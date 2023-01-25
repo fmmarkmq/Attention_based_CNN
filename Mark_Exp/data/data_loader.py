@@ -19,15 +19,15 @@ class ABC_Data_Loader(object):
             transform = torchvision.transforms.Compose([torchvision.transforms.ToTensor(), 
                                                         torchvision.transforms.Normalize((0.1307,), (0.3081,))])
             dataset = torchvision.datasets.MNIST('../../data/ABC/mnist', train=True, download=True, transform=transform)
-            train = torch.utils.data.DataLoader(dataset, batch_size=self.args.train.batch_size, shuffle=True)
+            train = torch.utils.data.DataLoader(dataset, batch_size=self.args.train_batch_size, shuffle=True)
         elif self.args.name == 'cifar10':
             transform = torchvision.transforms.Compose([torchvision.transforms.ToTensor(),
                                                         torchvision.transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
             dataset = torchvision.datasets.CIFAR10(root='../../data/ABC/CIFAR10', train=True, download=True, transform=transform)
-            train = torch.utils.data.DataLoader(dataset, batch_size=self.args.train.batch_size, shuffle=True, num_workers=2)
+            train = torch.utils.data.DataLoader(dataset, batch_size=self.args.train_batch_size, shuffle=True, num_workers=2)
         elif self.args.name in ['atd', 'wiki_traffic', 'lat']:
             dataset = TimeSeries_Train_Dataset(df=self.data, history_len=self.args.history_len, predict_len=self.args.predict_len)
-            train = DataLoader(dataset, batch_size = self.args.train.batch_size, shuffle=False, drop_last=False)
+            train = DataLoader(dataset, batch_size = self.args.train_batch_size, shuffle=False, drop_last=False)
         return train
 
     def predict_data_loader(self):
@@ -35,12 +35,12 @@ class ABC_Data_Loader(object):
             transform = torchvision.transforms.Compose([torchvision.transforms.ToTensor(),
                                                         torchvision.transforms.Normalize((0.1307,), (0.3081,))])
             dataset = torchvision.datasets.MNIST('../../data/ABC/mnist', train=False, download=True, transform=transform)
-            predict = torch.utils.data.DataLoader(dataset, batch_size=self.args.predict.batch_size, shuffle=False)
+            predict = torch.utils.data.DataLoader(dataset, batch_size=self.args.predict_batch_size, shuffle=False)
         elif self.args.name == "cifar10":
             transform = torchvision.transforms.Compose([torchvision.transforms.ToTensor(),
                                                         torchvision.transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
             testset = torchvision.datasets.CIFAR10(root='../../data/ABC/CIFAR10', train=False, download=True, transform=transform)
-            predict = torch.utils.data.DataLoader(testset, batch_size=self.args.train.batch_size,shuffle=False, num_workers=2)
+            predict = torch.utils.data.DataLoader(testset, batch_size=self.args.predict_batch_size,shuffle=False, num_workers=2)
         elif self.args.name in ['atd', 'wiki_traffic', 'lat']:
             dataset = TimeSeries_Pred_Dataset(df=self.data, history_len=self.args.history_len)
             predict = DataLoader(dataset, batch_size=1, shuffle=False, drop_last=False)
