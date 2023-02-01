@@ -9,19 +9,22 @@ class Linear_Module(nn.Module):
     def __init__(self, in_features, out_features, in_dim=None, out_dim=None, unflatten=None, activation=None, ltype='linear'):
         super().__init__()
         self.in_dim = in_dim
+        if type(self.in_dim) is int:
+            self.in_dim = (self.in_dim,)
         self.out_dim = out_dim
         self.unflatten = unflatten
 
         if activation == 'relu':
-            self.activate = nn.ReLU()
+            self.activate = nn.ReLU(inplace=True)
         elif activation == 'elu':
-            self.activate = nn.ELU()
+            self.activate = nn.ELU(inplace=True)
         else:
             self.activate = None
         self.linear = nn.Linear(in_features, out_features)
     
     def forward(self, x):
         if self.in_dim is not None:
+            self.in_dim = tuple(dim if dim != -1 else len(x.shape)-1 for dim in self.in_dim)
             x = x.permute(*tuple(i for i in range(len(x.shape)) if i not in self.in_dim), *self.in_dim)
             x = x.flatten(-len(self.in_dim), -1)
         x = self.linear(x)
@@ -36,14 +39,18 @@ class Linear_Module(nn.Module):
         return x
     
 class Conv_Module(nn.Module):
-    def __init__(self, layer_name, layer_paras, length=1, pool_name='avg', pool_size=(1,1), activation='relu', hash=None):
+    def __init__(self, layer_name, layer_paras, length=1, ds_size=(1,1), activation='relu', if_residual=True, hash=None):
         super().__init__()
         self.name = layer_name
         self.input_channel = layer_paras[0]
         self.output_channel = layer_paras[1]
         self.kernel_size = layer_paras[2]
+        self.if_residual = if_residual
         self.hash = hash
-        self.new_hash = hash.reshape(hash.shape[0], int(hash.shape[1]/pool_size[0]), pool_size[0], int(hash.shape[2]/pool_size[1]), pool_size[1], int(hash.shape[1]/pool_size[0]), pool_size[0], int(hash.shape[2]/pool_size[1]), pool_size[1]).permute(0,1,3,5,7,2,4,6,8).flatten(-4).mean(-1).flatten(-2)
+        if hash is not None:
+            self.new_hash = hash.reshape(hash.shape[0], int(hash.shape[1]/ds_size[0]), ds_size[0], int(hash.shape[2]/ds_size[1]), ds_size[1], int(hash.shape[1]/ds_size[0]), ds_size[0], int(hash.shape[2]/ds_size[1]), ds_size[1]).permute(0,1,3,5,7,2,4,6,8).flatten(-4).mean(-1).flatten(-2)
+        else:
+            self.new_hash = None
   
         if layer_name=='specific':
             self.conv = ABC_2D_Specific
@@ -58,27 +65,14 @@ class Conv_Module(nn.Module):
             self.last_conv_paras = (self.output_channel, self.output_channel, self.kernel_size, self.hash, *layer_paras[3:])
         elif layer_name=='large':
             self.conv = ABC_2D_Large
-            if length > 1:
-                self.first_conv_paras = (self.input_channel, self.output_channel, self.kernel_size, layer_paras[3], self.hash, *layer_paras[4:])
-            else:
-                self.first_conv_paras = (self.input_channel, self.output_channel, self.kernel_size, layer_paras[3], self.hash, pool_size, *layer_paras[5:])
+            self.first_conv_paras = (self.input_channel, self.output_channel, self.kernel_size, layer_paras[3], self.hash, ds_size, *layer_paras[5:])
             self.mid_conv_paras = (self.output_channel, self.output_channel, self.kernel_size, layer_paras[3], self.hash, *layer_paras[4:])
-            self.last_conv_paras  = (self.output_channel, self.output_channel, self.kernel_size, layer_paras[3], self.hash, pool_size, *layer_paras[5:])
+            self.last_conv_paras  = (self.output_channel, self.output_channel, self.kernel_size, layer_paras[3], self.hash, *layer_paras[5:])
         elif layer_name=='cnn2d':
             self.conv = nn.Conv2d
-            if length > 1:
-                self.first_conv_paras = (self.input_channel, self.output_channel, self.kernel_size, *layer_paras[3:])
-            else:
-                self.first_conv_paras = (self.input_channel, self.output_channel, self.kernel_size, pool_size, *layer_paras[4:])
+            self.first_conv_paras = (self.input_channel, self.output_channel, self.kernel_size, ds_size, *layer_paras[4:])
             self.mid_conv_paras = (self.output_channel, self.output_channel, self.kernel_size, *layer_paras[3:])
-            self.last_conv_paras  = (self.output_channel, self.output_channel, self.kernel_size, pool_size, *layer_paras[4:])
-        # elif layer_name=='cnn1d':
-        #     self.conv = nn.Conv1d(self.input_channel, self.output_channel, self.kernel_size, *paras[3:])
-
-        if pool_name == 'avg':
-            self.pool = nn.AvgPool2d
-        elif pool_name == 'avg':
-            self.pool = nn.MaxPool2d
+            self.last_conv_paras  = (self.output_channel, self.output_channel, self.kernel_size, *layer_paras[3:])
         
         if activation == 'relu':
             self.activate = nn.ReLU
@@ -87,22 +81,21 @@ class Conv_Module(nn.Module):
         
         self.first_stage = nn.Sequential(self.conv(*self.first_conv_paras), nn.BatchNorm2d(self.output_channel))
         self.mid_stages = nn.ModuleList([])
-        for i in range(length-2):
-            self.mid_stages.append(nn.Sequential(self.activate(), self.conv(*self.mid_conv_paras), nn.BatchNorm2d(self.output_channel)))
+        for _ in range(length-2):
+            self.mid_stages.append(nn.Sequential(self.activate(inplace=True), self.conv(*self.mid_conv_paras), nn.BatchNorm2d(self.output_channel)))
         self.last_stage = nn.Sequential()
         if length > 1 :
-            self.last_stage = nn.Sequential(nn.Sequential(self.activate(), self.conv(*self.last_conv_paras), nn.BatchNorm2d(self.output_channel)))
+            self.last_stage = nn.Sequential(nn.Sequential(self.activate(inplace=True), self.conv(*self.last_conv_paras), nn.BatchNorm2d(self.output_channel)))
         if self.name in ['specific', 'agnostic']:
-            self.last_stage.append(self.pool(pool_size))
-        
-        
-        if self.input_channel != self.output_channel:
-            self.input_connect = nn.Linear(self.input_channel, self.output_channel)
-        else:
+            self.last_stage.append(nn.AvgPool2d(ds_size))
+
+        if self.if_residual:
             self.input_connect = nn.Sequential()
-        self.input_pool = self.pool(pool_size)
-        
-        self.final_activate = self.activate()
+            if self.input_channel != self.output_channel or ds_size != (1,1):
+                self.input_connect.append(nn.Conv2d(self.input_channel, self.output_channel, kernel_size=1, stride=ds_size))
+                self.input_connect.append(nn.BatchNorm2d(self.output_channel))
+            
+        self.final_activate = self.activate(inplace=True)
         
     def forward(self, inputs):
         x = inputs
@@ -110,8 +103,8 @@ class Conv_Module(nn.Module):
         for mid_stage in self.mid_stages:
             x = mid_stage(x)
         x = self.last_stage(x)
-        inputs_connect = self.input_pool(self.input_connect(inputs.transpose(1,3)).transpose(1,3))
-        x = x + inputs_connect
+        if self.if_residual:
+            x = x + self.input_connect(inputs)
         x = self.final_activate(x)
         return x
 
@@ -174,4 +167,8 @@ class ABC_Net(nn.Module):
                 modules.append(Linear_Module(*paras))
             elif layer_name=='softmax':
                 modules.append(nn.Softmax(paras))
+            elif layer_name=='maxpool':
+                modules.append(nn.MaxPool2d(*paras))
+            elif layer_name=='adptavgpool':
+                modules.append(nn.AdaptiveAvgPool2d(paras))
         return modules

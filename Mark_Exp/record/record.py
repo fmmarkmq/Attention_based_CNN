@@ -6,9 +6,10 @@ import os
 import re
 
 class EXPERecords(object):
-    def __init__(self, record_path, build_new_file=False): 
+    def __init__(self, record_path, build_new_file=False, if_save=True):
         self.path, self.file = self._build_file_and_path(record_path, build_new_file)
         self.record = None
+        self.if_save = if_save
 
     def add_record(self, experiment_args):
         self.record_index = datetime.now().strftime("%m/%d/%Y %H:%M")
@@ -24,7 +25,8 @@ class EXPERecords(object):
         self.record['train_loss'][epoch] = train_loss
         self.record[epoch] = metric
         self.file = pd.concat([self.file.iloc[:-1].T, self.record], axis=1).T
-        self.file.to_csv(self.path, index=True)
+        if self.if_save:
+            self.file.to_csv(self.path, index=True)
         if if_print:
             print(f'epoch: {epoch[5:]}, train_loss: {round(train_loss, 4)}, test_metric: {metric}')
             

@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch import optim
-from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
+from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts, MultiStepLR
 import torch.nn.functional as F
 import os
 import time
@@ -17,10 +17,12 @@ from data.data_loader import ABC_Data_Loader
 from record.record import EXPERecords
 
 class ABC_Driver(object):
-    def __init__(self, args, data=None, record_path=None):
+    def __init__(self, args, data=None, record_path=None, if_hash=False, if_gpu=True):
         self.args = args
         self.data = data
         self.record_path = record_path
+        self.if_gpu = if_gpu
+        self.if_hash = if_hash
         self.device = self._acquire_device()
         self.data_loader = self._build_data_loader()
         self.model = self._build_model()
@@ -33,9 +35,9 @@ class ABC_Driver(object):
         model =self.model
         device = self.device
         criterion = self._select_criterion()
-        model_optim = self._select_optimizer()
-        if self.args.if_scheduler:
-            scheduler = CosineAnnealingWarmRestarts(model_optim, T_0=20, T_mult=2)
+        optimizer = self._select_optimizer()
+        scheduler = self._select_scheduler(optimizer)
+            
 
         for epoch in range(self.args.train_epochs):
             train_loss=[]
@@ -43,14 +45,13 @@ class ABC_Driver(object):
             for idx, (inputs, labels) in enumerate(train_loader):
                 inputs=inputs.to(device)
                 labels=labels.to(device)
-                model_optim.zero_grad(set_to_none = True)
+                optimizer.zero_grad(set_to_none = True)
                 preds = model(inputs)
                 loss = criterion(preds,labels)
                 train_loss.append(loss.item())
                 loss.backward()
-                model_optim.step()
-                if self.args.if_scheduler:
-                    scheduler.step()
+                optimizer.step()
+            scheduler.step()
             self.record.add_outcome_to_record('epoch'+str(epoch), np.average(train_loss), self.metric(), if_print=True)
         return self
 
@@ -64,28 +65,26 @@ class ABC_Driver(object):
         preds = torch.tensor([])
         for idx, (inputs, labels) in enumerate(pred_loader):
             pred = model(inputs.to(device)).cpu().detach()
-            preds = torch.concat([preds, pred])
+            preds = torch.concat([preds, pred], axis=0)
         return preds
 
     def metric(self, pred_loader=None):
-        if self.args.name not in ['cifar10','mnist']:
+        if self.args.name not in ['cifar100','cifar10','mnist']:
             return None
         if pred_loader is None:
-            pred_loader = self.data_loader.predict 
+            pred_loader = self.data_loader.predict
         y_true = pred_loader.dataset.targets
         y_pred = self.predict(pred_loader)
         return accuracy_score(y_true, y_pred.argmax(axis=1))
     
     def _acquire_device(self):
-        if self.args.use_gpu:
-            os.environ["CUDA_VISIBLE_DEVICES"] = str(self.args.gpu) if not self.args.use_multi_gpu else self.args.devices
+        if self.if_gpu:
+            # os.environ["CUDA_VISIBLE_DEVICES"] = str(self.args.gpu) if not self.args.use_multi_gpu else self.args.devices
             device = torch.device('cuda')
-            print('Use GPU: cuda:{}'.format(self.args.gpu))
+            print('Use GPU')
         else:
             device = torch.device('cpu')
             print('Use CPU')
-        
-        self.device = device
         return device
     
     def _build_data_loader(self):
@@ -94,21 +93,38 @@ class ABC_Driver(object):
     
     def _build_model(self):
         # self.hash = self.get_cov_hashTable(self.data_loader.train.dataset.data)
-        self.hash = self.get_hash(self.data_loader.train.dataset.data)
+        if self.if_hash:
+            self.hash = self.get_hash(self.data_loader.train.dataset.data)
+        else:
+            self.hash = None
         model = ABC_Net(self.args, self.hash).to(self.device)
         return model
     
     def _build_record(self):
-        if self.record_path is None:
+        if self.record_path == False:
+            if_save = False
+        else:
+            if_save = True
+        if type(self.record_path) is not str:
             self.record_path = 'record/records/' + self.args.name + '/'
-        record = EXPERecords(record_path=self.record_path, build_new_file=False)
+        record = EXPERecords(record_path=self.record_path, build_new_file=False, if_save=if_save)
         record.add_record(self.args)
         return record
     
     def _select_optimizer(self):
-        model_optim = optim.Adam(self.model.parameters(), lr=self.args.lr)
-        # model_optim = optim.SGD(self.model.parameters(), lr=self.args.lr, momentum=0.5)
+        # model_optim = optim.Adam(self.model.parameters(), lr=self.args.lr)
+        model_optim = optim.SGD(self.model.parameters(), lr=self.args.lr, momentum=0.9, weight_decay=0.0005)
         return model_optim
+    
+    def _select_scheduler(self, optimizer):
+        if self.args.scheduler == 'cos':
+            scheduler = CosineAnnealingWarmRestarts(optimizer, T_0=20, T_mult=2)
+        elif self.args.scheduler == 'multistep':
+            scheduler = MultiStepLR(optimizer, milestones=[90,135], gamma=0.1)
+        else:
+            scheduler = MultiStepLR(optimizer, milestones=[self.args.train_epochs], gamma=1)
+        return scheduler
+
     
     def _select_criterion(self):
         if self.args.criterion == 'L1':
@@ -122,7 +138,7 @@ class ABC_Driver(object):
         return criterion
 
     def get_hash(self, data_mat:torch.tensor):
-        if self.args.name == 'cifar10':
+        if self.args.name in ['cifar10', 'cifar100']:
             data_mat = torch.tensor(data_mat).permute(0,3,1,2)
         # data_mat = data_mat[:,:,0,:]
         data_shape = data_mat.shape
@@ -186,3 +202,7 @@ class ABC_Driver(object):
     #     hash = torch.concat(idx_list_channels, axis=0)
     #     # return {int(row[0][-1]): row for i, row in enumerate(idx_list_channels)}
     #     return hash
+
+
+
+    

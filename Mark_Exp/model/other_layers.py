@@ -5,10 +5,47 @@ from torch import  Tensor
 import numpy as np
 import math
 
-class MLP(torch.nn.Module): 
+
+class PowerExpansion(nn.Module):
+    def __init__(self, out_powers: int, if_learnable=False):
+        super(PowerExpansion, self).__init__()
+        self.out_powers = out_powers
+        self.if_learnable = if_learnable
+        if if_learnable:
+            self.weights = nn.Parameter(torch.arange(1, out_powers+1).to(torch.float32).reshape(1,out_powers))
+        else:
+            self.weights = torch.arange(1, out_powers+1).to(torch.float32).reshape(1,out_powers)
+    
+    def forward(self, x):
+        assert x.min() >= 0
+        x = x.log()
+        x = x.unsqueeze(-1)
+        x = torch.matmul(x, self.weights)
+        x = x.exp()
+        return x
+
+
+class PowerLinear(nn.Module):
+    def __init__(self, in_features: int, out_features: int, dim: int, input_min: torch.float32, eps=1e-05):
+        super(PowerLinear, self).__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.dim = dim
+        self.input_min = input_min
+        self.eps = eps
+        self.linear = nn.Linear(in_features, out_features)
+    
+    def forward(self, x):
+        x_sign = x.sign()
+        x = x.abs().log()
+        x = self.linear(x.transpose(self.dim, -1)).transpose(self.dim, -1)
+        x = x.exp()*x_sign
+        return x
+        
+
+class MLP(nn.Module): 
     def __init__(self, in_features: list, out_features: list, dims, activation='relu'):
         super(MLP,self).__init__() 
-        self.relu = nn.ReLU(inplace=True)
         self.in_features = in_features
         self.out_features = out_features
         self.test_paras(in_features, out_features, dims, activation)
@@ -76,3 +113,21 @@ class PositionalEncoding(nn.Module):
         """
         x = x + self.pe[:x.size(0)]
         return self.dropout(x)
+
+
+class WSConv2d(nn.Conv2d):
+
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1,
+                 padding=0, dilation=1, groups=1, bias=True):
+        super(WSConv2d, self).__init__(in_channels, out_channels, kernel_size, stride,
+                 padding, dilation, groups, bias)
+
+    def forward(self, x):
+        weight = self.weight
+        weight_mean = weight.mean(dim=1, keepdim=True).mean(dim=2,
+                                  keepdim=True).mean(dim=3, keepdim=True)
+        weight = weight - weight_mean
+        std = weight.view(weight.size(0), -1).std(dim=1).view(-1, 1, 1, 1) + 1e-5
+        weight = weight / std.expand_as(weight)
+        return F.conv2d(x, weight, self.bias, self.stride,
+                        self.padding, self.dilation, self.groups)
