@@ -60,7 +60,7 @@ class ABC_Driver(object):
         
         model.eval()
         preds = torch.tensor([])
-        for idx, (inputs, labels) in enumerate(pred_loader):
+        for _, (inputs, _) in enumerate(pred_loader):
             pred = model(inputs.to(device)).cpu().detach()
             preds = torch.concat([preds, pred], axis=0)
         return preds
