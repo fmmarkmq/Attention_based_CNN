@@ -2,11 +2,12 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 import numpy as np
-from model.ABC_Layer import ABC_2D_Agnostic, ABC_2D_Specific, ABC_2D_Large
-from model.other_layers import RowWiseLinear, PositionalEncoding, MLP
+from model.ABC_Layer import ABC_2D_Agnostic, ABC_2D_Specific, ABC_2D_Large, NeighborAttention, AttentionConv
+from model.other_layers import PowerExpansion
+from model.conv_layers import DERIConv2d, WSConv2d, WSAConv2d
 
 class Linear_Module(nn.Module):
-    def __init__(self, in_features, out_features, in_dim=None, out_dim=None, unflatten=None, activation=None, ltype='linear'):
+    def __init__(self, in_features, out_features, in_dim=None, out_dim=None, unflatten=None, activation=None):
         super().__init__()
         self.in_dim = in_dim
         if type(self.in_dim) is int:
@@ -14,10 +15,12 @@ class Linear_Module(nn.Module):
         self.out_dim = out_dim
         self.unflatten = unflatten
 
+        # self.norm = nn.BatchNorm1d(out_features)
+
         if activation == 'relu':
-            self.activate = nn.ReLU(inplace=True)
+            self.activate = nn.ReLU()
         elif activation == 'elu':
-            self.activate = nn.ELU(inplace=True)
+            self.activate = nn.ELU()
         else:
             self.activate = None
         self.linear = nn.Linear(in_features, out_features)
@@ -34,79 +37,135 @@ class Linear_Module(nn.Module):
             x = x.permute(tuple(out_permute_index))
         if self.unflatten is not None:
             x = x.unflatten(self.out_dim, self.unflatten)
+        # x = self.norm(x)
         if self.activate is not None:
             x = self.activate(x)
         return x
-    
+
+
 class Conv_Module(nn.Module):
-    def __init__(self, layer_name, layer_paras, length=1, ds_size=(1,1), activation='relu', if_residual=True, hash=None):
+    def __init__(self, layer_name, layer_paras, length=1, ds_position=None, ds_size=None, activation='relu', if_residual=True, norm='batch', hash=None):
         super().__init__()
         self.name = layer_name
+        self.layer_paras = layer_paras
         self.input_channel = layer_paras[0]
         self.output_channel = layer_paras[1]
-        self.kernel_size = layer_paras[2]
+        self.length = length
+        self.ds_position = ds_position
+        if ds_size is None:
+            ds_size = (1,1)
+        self.ds_size = ds_size
         self.if_residual = if_residual
         self.hash = hash
-        if hash is not None:
-            self.new_hash = hash.reshape(hash.shape[0], int(hash.shape[1]/ds_size[0]), ds_size[0], int(hash.shape[2]/ds_size[1]), ds_size[1], int(hash.shape[1]/ds_size[0]), ds_size[0], int(hash.shape[2]/ds_size[1]), ds_size[1]).permute(0,1,3,5,7,2,4,6,8).flatten(-4).mean(-1).flatten(-2)
-        else:
-            self.new_hash = None
-  
+        self.new_hash = self._build_new_hash()
+        self.conv_paras = self._make_conv_paras()
+
         if layer_name=='specific':
             self.conv = ABC_2D_Specific
-            self.first_conv_paras = (self.input_channel, self.output_channel, self.kernel_size, self.hash, *layer_paras[3:])
-            self.mid_conv_paras = (self.output_channel, self.output_channel, self.kernel_size, self.hash, *layer_paras[3:])
-            self.last_conv_paras = (self.output_channel, self.output_channel, self.kernel_size, self.hash, *layer_paras[3:])
-
         elif layer_name=='agnostic':
             self.conv = ABC_2D_Agnostic
-            self.first_conv_paras = (self.input_channel, self.output_channel, self.kernel_size, self.hash, *layer_paras[3:])
-            self.mid_conv_paras = (self.output_channel, self.output_channel, self.kernel_size, self.hash, *layer_paras[3:])
-            self.last_conv_paras = (self.output_channel, self.output_channel, self.kernel_size, self.hash, *layer_paras[3:])
         elif layer_name=='large':
             self.conv = ABC_2D_Large
-            self.first_conv_paras = (self.input_channel, self.output_channel, self.kernel_size, layer_paras[3], self.hash, ds_size, *layer_paras[5:])
-            self.mid_conv_paras = (self.output_channel, self.output_channel, self.kernel_size, layer_paras[3], self.hash, *layer_paras[4:])
-            self.last_conv_paras  = (self.output_channel, self.output_channel, self.kernel_size, layer_paras[3], self.hash, *layer_paras[5:])
         elif layer_name=='cnn2d':
             self.conv = nn.Conv2d
-            self.first_conv_paras = (self.input_channel, self.output_channel, self.kernel_size, ds_size, *layer_paras[4:])
-            self.mid_conv_paras = (self.output_channel, self.output_channel, self.kernel_size, *layer_paras[3:])
-            self.last_conv_paras  = (self.output_channel, self.output_channel, self.kernel_size, *layer_paras[3:])
-        
+        elif layer_name=='dericonv2d':
+            self.conv = DERIConv2d
+        elif layer_name=='nba2d':
+            self.conv = NeighborAttention
+        elif layer_name== 'atc2d':
+            self.conv = AttentionConv
+        elif layer_name== 'wsc2d':
+            self.conv = WSConv2d
+        elif layer_name== 'wsca2d':
+            self.conv = WSAConv2d    
+
         if activation == 'relu':
             self.activate = nn.ReLU
         elif activation == 'elu':
             self.activate = nn.ELU
-        
-        self.first_stage = nn.Sequential(self.conv(*self.first_conv_paras), nn.BatchNorm2d(self.output_channel))
-        self.mid_stages = nn.ModuleList([])
-        for _ in range(length-2):
-            self.mid_stages.append(nn.Sequential(self.activate(inplace=True), self.conv(*self.mid_conv_paras), nn.BatchNorm2d(self.output_channel)))
-        self.last_stage = nn.Sequential()
-        if length > 1 :
-            self.last_stage = nn.Sequential(nn.Sequential(self.activate(inplace=True), self.conv(*self.last_conv_paras), nn.BatchNorm2d(self.output_channel)))
-        if self.name in ['specific', 'agnostic']:
-            self.last_stage.append(nn.AvgPool2d(ds_size))
+        elif activation == False:
+            self.activate = nn.Sequential
+
+        self.pool = nn.AvgPool2d
+        # self.pool = nn.MaxPool2d
+            
+
+        self.layerlist = nn.ModuleList([])
+        for i, conv_para in enumerate(self.conv_paras):
+            self.layerlist.append(self.conv(*conv_para, bias=False))
+            self.layerlist.append(nn.BatchNorm2d(self.output_channel))
+            if i < self.length-1:
+                self.layerlist.append(self.activate())
+        if (self.name in ['specific', 'agnostic']) and (ds_size not in [(1,1), None]):
+            self.layerlist.append(self.pool(ds_size))
+        if (self.name in ['nba2d', 'atc2d']) and (ds_size not in [(1,1), None]):
+            if ds_position == 'first':
+                self.layerlist.insert(1, self.pool(ds_size))
+            elif ds_position == 'last':
+                self.layerlist.insert(-2, self.pool(ds_size))
 
         if self.if_residual:
             self.input_connect = nn.Sequential()
-            if self.input_channel != self.output_channel or ds_size != (1,1):
+            if self.input_channel != self.output_channel or (ds_size not in [(1,1), None]):
                 self.input_connect.append(nn.Conv2d(self.input_channel, self.output_channel, kernel_size=1, stride=ds_size))
                 self.input_connect.append(nn.BatchNorm2d(self.output_channel))
             
-        self.final_activate = self.activate(inplace=True)
+        self.final_activate = self.activate()
+        self._weight_initialize()
         
     def forward(self, inputs):
         x = inputs
-        x = self.first_stage(x)
-        for mid_stage in self.mid_stages:
-            x = mid_stage(x)
-        x = self.last_stage(x)
+        for _, layer in enumerate(self.layerlist):
+            x = layer(x)
+
         if self.if_residual:
-            x = x + self.input_connect(inputs)
+            x += self.input_connect(inputs)
         x = self.final_activate(x)
         return x
+
+    def _make_conv_paras(self):
+        layer_name = self.name
+        layer_paras = self.layer_paras
+
+        layer_paras = (self.output_channel, *layer_paras[1:])
+        if layer_name in ['specific','agnostic']:
+            layer_paras = (*layer_paras[:3], self.hash, *layer_paras[3:])
+        elif layer_name=='large':
+            layer_paras = (*layer_paras[:4], self.hash, *layer_paras[4:])
+        
+        conv_paras = [layer_paras]* self.length
+        conv_paras[0] = (self.input_channel, *conv_paras[0][1:])
+
+        assert self.ds_position in ['first', 'last', None]
+        if self.ds_position is not None:
+            if self.ds_position == 'first':
+                ds_index = 0
+            elif self.ds_position == 'last':
+                ds_index = -1
+            if layer_name=='large':
+                conv_paras[ds_index] = (*conv_paras[ds_index][:5], self.ds_size, *conv_paras[ds_index][6:])
+            elif layer_name in ['cnn2d', 'dericonv2d', 'wsc2d', 'wsac2d']:
+                conv_paras[ds_index] = (*conv_paras[ds_index][:3], self.ds_size, *conv_paras[ds_index][4:])
+        return conv_paras
+    
+    def _weight_initialize(self):
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+            elif isinstance(m, (nn.BatchNorm2d, nn.GroupNorm)):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+    
+    def _build_new_hash(self):
+        if (self.hash is not None) and (self.ds_size != (1,1)) and (self.ds_size is not None):
+            HC, HH, HW, HHW = self.hash.shape
+            DH, DW = self.ds_size
+            new_hash = self.hash.reshape(HC, int(HH/DH), DH, int(HW/DW), DW, int(HH/DH), DH, int(HW/DW), DW)
+            new_hash = new_hash.permute(0,1,3,5,7,2,4,6,8).flatten(-4).mean(-1).flatten(-2)
+        else:
+            new_hash = self.hash
+        return new_hash
+
 
 class Attention_Module(nn.Module):
     def __init__(self, d_model, n_head, length=1):
@@ -116,7 +175,7 @@ class Attention_Module(nn.Module):
         self.n_head = n_head
         self.length = length
         self.trans_modules = nn.ModuleList([])
-        for i in range(self.length):
+        for _ in range(self.length):
             self.trans_modules.append(nn.TransformerEncoderLayer(self.d_model, self.n_head, 
                                                                  batch_first=True, norm_first=True, 
                                                                  dim_feedforward=2*self.d_model))
@@ -145,20 +204,21 @@ class Attention_Module(nn.Module):
 class ABC_Net(nn.Module):
     def __init__(self, args, hash):
         super(ABC_Net, self).__init__()
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.args = args
         self.hash = hash
         self.full_modules = self._make_modules(self.args.layers, self.hash)
     
-    def forward(self,x):
+    def forward(self, x):
         B,C,H,W = x.shape
-        for i, module in enumerate(self.full_modules):
+        for _, module in enumerate(self.full_modules):
             x = module(x)
         return x
 
     def _make_modules(self, layers, hash):
         modules = nn.ModuleList([])
         for layer_name, paras in layers:
-            if layer_name in ['specific', 'agnostic', 'large', 'cnn2d', 'cnn1d']:
+            if layer_name in ['specific', 'agnostic', 'large', 'cnn2d', 'dericonv2d','nba2d', 'atc2d', 'wsc2d', 'wsac2d']:
                 modules.append(Conv_Module(layer_name, *paras, hash=hash))
                 hash = modules[-1].new_hash
             elif layer_name in 'attention':
@@ -169,6 +229,10 @@ class ABC_Net(nn.Module):
                 modules.append(nn.Softmax(paras))
             elif layer_name=='maxpool':
                 modules.append(nn.MaxPool2d(*paras))
+            elif layer_name=='avgpool':
+                modules.append(nn.AvgPool2d(*paras))
             elif layer_name=='adptavgpool':
                 modules.append(nn.AdaptiveAvgPool2d(paras))
+            elif layer_name=='powerexpansion':
+                modules.append(PowerExpansion(*paras))
         return modules

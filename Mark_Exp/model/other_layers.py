@@ -7,21 +7,38 @@ import math
 
 
 class PowerExpansion(nn.Module):
-    def __init__(self, out_powers: int, if_learnable=False):
+    def __init__(self, out_powers: int, in_channel, power_learnable=False, fc=True, device=None):
         super(PowerExpansion, self).__init__()
         self.out_powers = out_powers
-        self.if_learnable = if_learnable
-        if if_learnable:
-            self.weights = nn.Parameter(torch.arange(1, out_powers+1).to(torch.float32).reshape(1,out_powers))
+        self.in_channel = in_channel
+        self.learnable = power_learnable
+        self.fc = fc
+        self.device = device
+        if device is None:
+            self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        
+        if power_learnable:
+            self.expansion = nn.Parameter(torch.arange(1, out_powers+1, dtype=torch.float32).reshape(1,out_powers))
         else:
-            self.weights = torch.arange(1, out_powers+1).to(torch.float32).reshape(1,out_powers)
+            self.expansion = torch.arange(1, out_powers+1, dtype=torch.float32, device=self.device).reshape(1,out_powers)
+        if self.fc:
+            self.linear = RowWiseLinear(in_channel, out_powers, 1)
+            # self.linear = nn.Linear(out_powers, 1)
+            
     
     def forward(self, x):
+        B,C,H,W = x.shape
+        if x.min()<0:
+            print(x.min())
         assert x.min() >= 0
         x = x.log()
         x = x.unsqueeze(-1)
-        x = torch.matmul(x, self.weights)
+        x = torch.matmul(x, self.expansion)
         x = x.exp()
+        if self.fc:
+            x = x.transpose(1,3)
+            x = self.linear(x).squeeze(-1)
+            x = x.transpose(1,3)
         return x
 
 
@@ -34,6 +51,7 @@ class PowerLinear(nn.Module):
         self.input_min = input_min
         self.eps = eps
         self.linear = nn.Linear(in_features, out_features)
+
     
     def forward(self, x):
         x_sign = x.sign()
@@ -41,11 +59,11 @@ class PowerLinear(nn.Module):
         x = self.linear(x.transpose(self.dim, -1)).transpose(self.dim, -1)
         x = x.exp()*x_sign
         return x
-        
+
 
 class MLP(nn.Module): 
     def __init__(self, in_features: list, out_features: list, dims, activation='relu'):
-        super(MLP,self).__init__() 
+        super(MLP, self).__init__() 
         self.in_features = in_features
         self.out_features = out_features
         self.test_paras(in_features, out_features, dims, activation)
@@ -79,18 +97,19 @@ class MLP(nn.Module):
         assert (type(dims) is int) or (len(dims) == len(in_features))
         assert activation in ['relu', 'elu']
 
+
 class RowWiseLinear(nn.Module):
     def __init__(self, height, width, out_width):
-        super().__init__()
+        super(RowWiseLinear, self).__init__()
         self.height = height
         self.width = width
         self.weights = nn.Parameter(torch.empty(height, out_width, width))
         nn.init.uniform_(self.weights, a=-np.sqrt(1/out_width), b=np.sqrt(1/out_width))
 
     def forward(self, x):
-        x_unsqueezed = x.unsqueeze(-1)
-        w_times_x = torch.matmul(self.weights, x_unsqueezed)
-        return w_times_x
+        x = x.unsqueeze(-1)
+        x = torch.matmul(self.weights, x)
+        return x.squeeze(-1)
 
 
 class PositionalEncoding(nn.Module):
@@ -114,20 +133,3 @@ class PositionalEncoding(nn.Module):
         x = x + self.pe[:x.size(0)]
         return self.dropout(x)
 
-
-class WSConv2d(nn.Conv2d):
-
-    def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-                 padding=0, dilation=1, groups=1, bias=True):
-        super(WSConv2d, self).__init__(in_channels, out_channels, kernel_size, stride,
-                 padding, dilation, groups, bias)
-
-    def forward(self, x):
-        weight = self.weight
-        weight_mean = weight.mean(dim=1, keepdim=True).mean(dim=2,
-                                  keepdim=True).mean(dim=3, keepdim=True)
-        weight = weight - weight_mean
-        std = weight.view(weight.size(0), -1).std(dim=1).view(-1, 1, 1, 1) + 1e-5
-        weight = weight / std.expand_as(weight)
-        return F.conv2d(x, weight, self.bias, self.stride,
-                        self.padding, self.dilation, self.groups)

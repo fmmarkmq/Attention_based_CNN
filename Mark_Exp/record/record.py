@@ -12,10 +12,9 @@ class EXPERecords(object):
         self.if_save = if_save
 
     def add_record(self, experiment_args):
-        self.record_index = datetime.now().strftime("%m/%d/%Y %H:%M")
+        self.record_index = str(datetime.now().strftime("%m/%d/%Y %H:%M"))
         self.record = pd.Series(experiment_args.copy(), name=self.record_index)
-        columns = self.record.index.union(self.file.columns, sort=False)
-        self.file = pd.concat([self.file.T, self.record], axis=1).T[columns]
+        self.last_time = time.time()
         print(f'add record: {self.record_index}')
 
 
@@ -24,12 +23,23 @@ class EXPERecords(object):
                 self.record['train_loss'] = dict()
         self.record['train_loss'][epoch] = train_loss
         self.record[epoch] = metric
-        self.file = pd.concat([self.file.iloc[:-1].T, self.record], axis=1).T
-        if self.if_save:
-            self.file.to_csv(self.path, index=True)
         if if_print:
-            print(f'epoch: {epoch[5:]}, train_loss: {round(train_loss, 4)}, test_metric: {metric}')
-            
+            self._print(epoch, train_loss, metric, time.time()-self.last_time)
+        if self.if_save:
+            self._save()
+        self.last_time = time.time()
+    
+    def _save(self):
+        if os.path.isfile(self.path):
+            self.file = pd.read_csv(self.path, index_col=0)
+        columns = self.record.index.union(self.file.columns, sort=False)
+        self.file = self.file[self.file.index != self.record_index]
+        self.file = pd.concat([self.file.T, self.record], axis=1).T[columns]
+        self.file.to_csv(self.path, index=True)
+
+    def _print(self, epoch: str, train_loss, metric, elapsed_time):
+        print(f'epoch: {epoch[5:]}, train_loss: {round(train_loss, 4)}, test_metric: {metric}, time: {elapsed_time}')
+
 
     def _build_file_and_path(self, record_path:str, build_new_file):
         if os.path.isfile(record_path):
