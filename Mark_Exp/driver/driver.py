@@ -4,33 +4,35 @@ from torch.utils.data import DataLoader
 from torch import optim
 from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts, MultiStepLR
 import torch.nn.functional as F
+import torchvision
 import os
 import time
 import numpy as np
 import pandas as pd
 from sklearn.metrics import accuracy_score
-from model.model import ABC_Net
+from model.model import ABC_Net, PipelineParallelABC_Net, ResMLPNet, ConvMixer
 from data.data_loader import ABC_Data_Loader
 from record.record import EXPERecords
-from model.Stand_Alone_Self_Attention.model import ResNet26
+from attack.attack import Attack
+
 
 class ABC_Driver(object):
-    def __init__(self, args, data=None, record_path=None, if_hash=False, if_gpu=True):
+    def __init__(self, args, data=None, record_path=None, if_hash=False):
         self.args = args
         self.data = data
         self.record_path = record_path
-        self.if_gpu = if_gpu
         self.if_hash = if_hash
         self.device = self._acquire_device()
         self.data_loader = self._build_data_loader()
         self.model = self._build_model()
         self.record = self._build_record()
+        self.attack = self._build_attack()
 
     def train(self, train_loader=None):
         if train_loader is None:
             train_loader = self.data_loader.train 
         model =self.model
-        device = self.device
+        device = self.device[0]
         criterion = self._select_criterion()
         optimizer = self._select_optimizer()
         scheduler = self._select_scheduler(optimizer)
@@ -42,46 +44,54 @@ class ABC_Driver(object):
             for _, (inputs, labels) in enumerate(train_loader):
                 inputs=inputs.to(device)
                 labels=labels.to(device)
-                optimizer.zero_grad(set_to_none = True)
+                optimizer.zero_grad(set_to_none=True)
                 preds = model(inputs)
                 loss = criterion(preds,labels)
                 train_loss.append(loss.item())
                 loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
                 optimizer.step()
-            scheduler.step()
-            self.record.add_outcome_to_record('epoch'+str(epoch), np.average(train_loss), self.metric(), if_print=True)
+                if self.scheduler_step_after_batch:
+                    scheduler.step()
+            if not self.scheduler_step_after_batch:
+                scheduler.step()
+            self.record.add_train_log('epoch'+str(epoch), np.average(train_loss), self.metric(), if_print=True)
+        self.record.add_test_outcome(self.metric(test_attack=True))
         return self
 
     def predict(self, pred_loader=None):
-        if pred_loader is None:
-            pred_loader = self.data_loader.predict 
+        pred_loader = pred_loader or self.data_loader.predict 
         model =self.model
-        device = self.device
-        
+        device = self.device[0]
+
         model.eval()
-        preds = torch.tensor([])
-        for _, (inputs, _) in enumerate(pred_loader):
-            pred = model(inputs.to(device)).cpu().detach()
-            preds = torch.concat([preds, pred], axis=0)
+        with torch.no_grad():
+            preds = torch.tensor([])
+            for _, (inputs, _) in enumerate(pred_loader):
+                pred = model(inputs.to(device)).cpu().detach()
+                preds = torch.concat([preds, pred], axis=0)
         return preds
 
-    def metric(self, pred_loader=None):
+    def metric(self, test_attack=False):
         if self.args.name not in ['cifar100','cifar10','mnist']:
             return None
-        if pred_loader is None:
-            pred_loader = self.data_loader.predict
-        y_true = pred_loader.dataset.targets
-        y_pred = self.predict(pred_loader).argmax(axis=1)
-        return accuracy_score(y_true, y_pred)
+        y_true = self.data_loader.predict.dataset.targets
+        y_pred = self.predict(self.data_loader.predict).argmax(axis=1)
+        accuracy = accuracy_score(y_true, y_pred)
+        if test_attack:
+            metric = pd.Series({'clean':accuracy})
+            for attacker_name in self.args.attack:
+                metric[attacker_name] = self.attack(attacker_name, self.model)
+            return metric
+        else:
+            return accuracy
     
     def _acquire_device(self):
-        if self.if_gpu:
-            # os.environ["CUDA_VISIBLE_DEVICES"] = str(self.args.gpu) if not self.args.use_multi_gpu else self.args.devices
-            device = torch.device('cuda')
-            print('Use GPU')
+        if isinstance(self.args.device, str):
+            device = [torch.device(self.args.device)]
         else:
-            device = torch.device('cpu')
-            print('Use CPU')
+            device = [torch.device(device_name) for device_name in self.args.device]
+        print(f'Use: {self.args.device}')
         return device
     
     def _build_data_loader(self):
@@ -90,15 +100,24 @@ class ABC_Driver(object):
     
     def _build_model(self):
         if self.args.model == 'resnet':
-            model = ResNet26(num_classes=10).to(self.device)
+            model = torchvision.models.resnet34(num_classes=100).to(self.device[0])
+            return model
+        if self.args.model == 'resmlp':
+            model = ResMLPNet().to(self.device[0])
+            return model
+        if self.args.model == 'convmixer':
+            model = ConvMixer(256,16,8,1,10).to('cuda').to(self.device[0])
             return model
         if self.if_hash:
             self.hash = self.get_hash(self.data_loader.train.dataset.data)
         else:
             self.hash = None
-        model = ABC_Net(self.args, self.hash).to(self.device)
+        if len(self.device) == 1:
+            model = ABC_Net(self.args, self.hash).to(self.device[0])
+        else:
+            model = PipelineParallelABC_Net(self.args, self.hash, self.device)
         return model
-    
+
     def _build_record(self):
         if self.record_path == False:
             if_save = False
@@ -110,15 +129,28 @@ class ABC_Driver(object):
         record.add_record(self.args)
         return record
     
+    def _build_attack(self):
+        bounds, preprocessing, attack_data_loader = self.data_loader.attack
+        attack = Attack(self.args, bounds, preprocessing, attack_data_loader, device=self.device[0])
+        return attack
+
     def _select_optimizer(self):
         if self.args.optimizer == 'Adam':
-            model_optim = optim.Adam(self.model.parameters(), lr=self.args.lr, weight_decay=0.0001)
+            model_optim = optim.Adam(self.model.parameters(), lr=self.args.lr, weight_decay=0.0001789)
+        elif self.args.optimizer == 'AdamW':
+            model_optim = optim.AdamW(self.model.parameters(), lr=self.args.lr, weight_decay=0, eps=0.001)
         else:
             model_optim = optim.SGD(self.model.parameters(), lr=self.args.lr, momentum=0.9, weight_decay=0.0001)
         return model_optim
     
     def _select_scheduler(self, optimizer):
-        if self.args.scheduler == 'cos':
+        self.scheduler_step_after_batch = False
+        if self.args.scheduler == 'OneCycle':
+            scheduler = optim.lr_scheduler.OneCycleLR(optimizer, max_lr=self.args.lr, div_factor=25,
+                                                        steps_per_epoch=len(self.data_loader.train), 
+                                                        epochs=self.args.train_epochs)
+            self.scheduler_step_after_batch = True
+        elif self.args.scheduler == 'cos':
             scheduler = CosineAnnealingWarmRestarts(optimizer, T_0=20, T_mult=2)
         elif self.args.scheduler == 'multistep':
             scheduler = MultiStepLR(optimizer, milestones=[30,60,90,120,150,180,210,240], gamma=0.5)
@@ -126,6 +158,8 @@ class ABC_Driver(object):
             scheduler = MultiStepLR(optimizer, milestones=[30,35,40,45,50,55,60,65], gamma=0.5)
         elif self.args.scheduler == 'multistep3':
             scheduler = MultiStepLR(optimizer, milestones=[4,8,12,16,20,24], gamma=0.5)
+        elif self.args.scheduler == 'multistep4':
+            scheduler = MultiStepLR(optimizer, milestones=[81,122], gamma=0.1)
         else:
             scheduler = MultiStepLR(optimizer, milestones=[self.args.train_epochs], gamma=1)
         return scheduler

@@ -19,7 +19,7 @@ class Conv(nn.Module):
         self.device = device
         if device is None:
             self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.kernel_len = kernel_size[0]*kernel_size[1]
+        self.kernel_len = self.kernel_size[0]*self.kernel_size[1]
         self.new_shape = None
 
     def _new_shape(self, H, W):

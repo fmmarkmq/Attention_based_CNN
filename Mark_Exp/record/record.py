@@ -18,7 +18,7 @@ class EXPERecords(object):
         print(f'add record: {self.record_index}')
 
 
-    def add_outcome_to_record(self, epoch: str, train_loss, metric, if_print=True):
+    def add_train_log(self, epoch: str, train_loss, metric, if_print=True):
         if 'train_loss' not in self.record.index:
                 self.record['train_loss'] = dict()
         self.record['train_loss'][epoch] = train_loss
@@ -28,6 +28,15 @@ class EXPERecords(object):
         if self.if_save:
             self._save()
         self.last_time = time.time()
+
+    def add_test_outcome(self, outcome: pd.Series):
+        print(outcome)
+        self.record = self.record[~self.record.isin(outcome.index)]
+        loc = self.record.index.get_loc('train_loss')
+        self.record = self.record[:loc].append(outcome).append(self.record[loc:]).rename(self.record_index)
+        if self.if_save:
+            self._save()
+
     
     def _save(self):
         if os.path.isfile(self.path):

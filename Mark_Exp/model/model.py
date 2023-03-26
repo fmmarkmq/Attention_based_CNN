@@ -2,12 +2,14 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 import numpy as np
-from model.ABC_Layer import ABC_2D_Agnostic, ABC_2D_Specific, ABC_2D_Large, NeighborAttention, AttentionConv
-from model.other_layers import PowerExpansion
+from model.ABC_Layer import ABC_2D_Agnostic, ABC_2D_Specific, ABC_2D_Large
+from model.ABC_Layer import NeighborAttention, AttentionConv, AttentionResConv, DepthAttentionResConv
+from model.other_layers import PowerExpansion, MLP, ResMLP, ResLinear
 from model.conv_layers import DERIConv2d, WSConv2d, WSAConv2d
+from utils.tools import dotdict
 
 class Linear_Module(nn.Module):
-    def __init__(self, in_features, out_features, in_dim=None, out_dim=None, unflatten=None, activation=None):
+    def __init__(self, in_features, out_features, in_dim=None, out_dim=None, unflatten=None, activation=None, device=None):
         super().__init__()
         self.in_dim = in_dim
         if type(self.in_dim) is int:
@@ -74,6 +76,10 @@ class Conv_Module(nn.Module):
             self.conv = NeighborAttention
         elif layer_name== 'atc2d':
             self.conv = AttentionConv
+        elif layer_name== 'atrc2d':
+            self.conv = AttentionResConv
+        elif layer_name== 'datrc2d':
+            self.conv = DepthAttentionResConv
         elif layer_name== 'wsc2d':
             self.conv = WSConv2d
         elif layer_name== 'wsca2d':
@@ -90,19 +96,21 @@ class Conv_Module(nn.Module):
         # self.pool = nn.MaxPool2d
             
 
-        self.layerlist = nn.ModuleList([])
+        layerlist = []
         for i, conv_para in enumerate(self.conv_paras):
-            self.layerlist.append(self.conv(*conv_para, bias=False))
-            self.layerlist.append(nn.BatchNorm2d(self.output_channel))
+            layerlist.append(self.conv(*conv_para, bias=False))
+            layerlist.append(nn.BatchNorm2d(self.output_channel))
             if i < self.length-1:
-                self.layerlist.append(self.activate())
+                layerlist.append(self.activate())
         if (self.name in ['specific', 'agnostic']) and (ds_size not in [(1,1), None]):
-            self.layerlist.append(self.pool(ds_size))
-        if (self.name in ['nba2d', 'atc2d']) and (ds_size not in [(1,1), None]):
+            layerlist.append(self.pool(ds_size))
+        if (self.name in ['nba2d', 'atc2d', 'atrc2d', 'datrc2d']) and (ds_size not in [(1,1), None]):
             if ds_position == 'first':
-                self.layerlist.insert(1, self.pool(ds_size))
+                layerlist.insert(1, self.pool(ds_size))
             elif ds_position == 'last':
-                self.layerlist.insert(-2, self.pool(ds_size))
+                layerlist.insert(-2, self.pool(ds_size))
+        
+        self.layerlist = nn.Sequential(*layerlist)
 
         if self.if_residual:
             self.input_connect = nn.Sequential()
@@ -115,9 +123,7 @@ class Conv_Module(nn.Module):
         
     def forward(self, inputs):
         x = inputs
-        for _, layer in enumerate(self.layerlist):
-            x = layer(x)
-
+        x = self.layerlist(x)
         if self.if_residual:
             x += self.input_connect(inputs)
         x = self.final_activate(x)
@@ -151,10 +157,11 @@ class Conv_Module(nn.Module):
     def _weight_initialize(self):
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
             elif isinstance(m, (nn.BatchNorm2d, nn.GroupNorm)):
                 nn.init.constant_(m.weight, 1)
                 nn.init.constant_(m.bias, 0)
+        nn.init.constant_(self.layerlist[-1].weight, 1)
     
     def _build_new_hash(self):
         if (self.hash is not None) and (self.ds_size != (1,1)) and (self.ds_size is not None):
@@ -202,15 +209,15 @@ class Attention_Module(nn.Module):
         
 
 class ABC_Net(nn.Module):
-    def __init__(self, args, hash):
+    def __init__(self, args: dotdict, hash):
         super(ABC_Net, self).__init__()
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.args = args
         self.hash = hash
         self.full_modules = self._make_modules(self.args.layers, self.hash)
+        
     
     def forward(self, x):
-        B,C,H,W = x.shape
         for _, module in enumerate(self.full_modules):
             x = module(x)
         return x
@@ -218,7 +225,8 @@ class ABC_Net(nn.Module):
     def _make_modules(self, layers, hash):
         modules = nn.ModuleList([])
         for layer_name, paras in layers:
-            if layer_name in ['specific', 'agnostic', 'large', 'cnn2d', 'dericonv2d','nba2d', 'atc2d', 'wsc2d', 'wsac2d']:
+            if layer_name in ['specific', 'agnostic', 'large', 'cnn2d', 'dericonv2d',
+                              'nba2d', 'atc2d', 'atrc2d', 'datrc2d', 'wsc2d', 'wsac2d']:
                 modules.append(Conv_Module(layer_name, *paras, hash=hash))
                 hash = modules[-1].new_hash
             elif layer_name in 'attention':
@@ -236,3 +244,88 @@ class ABC_Net(nn.Module):
             elif layer_name=='powerexpansion':
                 modules.append(PowerExpansion(*paras))
         return modules
+    
+
+class PipelineParallelABC_Net(nn.Module):
+    def __init__(self, args: dotdict, hash, devices, split_size=20):
+        super(PipelineParallelABC_Net, self).__init__()
+        self.args = args
+        self.hash = hash
+        self.device = devices
+        self.split_size = split_size
+
+        self.args_first_half, self.args_second_half = self._build_args()
+        self.module_first_half = ABC_Net(args=self.args_first_half, hash=self.hash).to(self.device[0])
+        self.module_second_half = ABC_Net(args=self.args_second_half, hash=self.module_first_half.full_modules[-1].new_hash).to(self.device[1])
+
+
+    def forward(self, x):
+        splits = iter(x.split(self.split_size, dim=0))
+        s_next = next(splits)
+        s_prev = self.module_first_half(s_next).to(self.device[1])
+        ret = []
+
+        for s_next in splits:
+            s_prev = self.module_second_half(s_prev)
+            ret.append(s_prev)
+            s_prev = self.module_first_half(s_next).to(self.device[1])
+
+        s_prev = self.module_second_half(s_prev)
+        ret.append(s_prev)
+
+        return torch.concat(ret, dim=0).to(self.device[0])
+
+
+    def _build_args(self):
+        # full_modules_len = len(self.args.layers)
+        args_first_half = dotdict(self.args.copy())
+        args_second_half = dotdict(self.args.copy())
+        args_first_half.layers = self.args.layers[:3]
+        args_second_half.layers = self.args.layers[3:]
+        return args_first_half, args_second_half
+    
+
+class ResMLPNet(nn.Module):
+    def __init__(self):
+        super(ResMLPNet, self).__init__()
+        self.res_mlp = ResMLP(1, [784], [784])
+        self.relu = nn.ReLU(inplace=True)
+        self.fc = nn.Linear(784, 10)
+    
+    def forward(self,x):
+        B,C,H,W = x.shape
+        x = x.reshape(B,-1)
+        x = self.res_mlp(x)
+        x = self.relu(x)
+        x = self.fc(x)
+        return x
+
+
+class Residual(nn.Module):
+    def __init__(self, fn):
+        super().__init__()
+        self.fn = fn
+
+    def forward(self, x):
+        return self.fn(x) + x
+
+
+def ConvMixer(dim, depth, kernel_size=9, patch_size=7, n_classes=1000):
+    return nn.Sequential(
+        nn.Conv2d(3, dim, kernel_size=patch_size, stride=patch_size),
+        nn.GELU(),
+        nn.BatchNorm2d(dim),
+        *[nn.Sequential(
+            Residual(nn.Sequential(
+                nn.Conv2d(dim, dim, kernel_size, groups=dim, padding="same"),
+                nn.GELU(),
+                nn.BatchNorm2d(dim)
+            )),
+            nn.Conv2d(dim, dim, kernel_size=1),
+            nn.GELU(),
+            nn.BatchNorm2d(dim)
+        ) for i in range(depth)],
+        nn.AdaptiveAvgPool2d((1, 1)),
+        nn.Flatten(),
+        nn.Linear(dim, n_classes)
+    )

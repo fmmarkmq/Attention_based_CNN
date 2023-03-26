@@ -5,6 +5,126 @@ import numpy as np
 from model.conv_layers import Conv
 
 
+class DepthAttentionResConv(Conv):
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, bias=True, device=None):
+        super(DepthAttentionResConv, self).__init__(in_channels, out_channels, kernel_size, stride, padding, dilation, in_channels, bias, device)
+        self.center_idx = (self.kernel_len-1)//2
+        self.group_out_channels = self.kernel_len * in_channels // self.groups
+        rel_ped_H = torch.arange(self.kernel_size[0]).reshape(1, 1, self.kernel_size[0], 1).repeat(1, 1,1,self.kernel_size[1])
+        rel_ped_W = torch.arange(self.kernel_size[0]).reshape(1, 1, 1, self.kernel_size[0]).repeat(1, 1,self.kernel_size[0],1)
+        rel_ped = torch.concat([rel_ped_H,rel_ped_W], dim=1).to(torch.float32)-(self.kernel_size[0]-1)//2
+        self.register_buffer('rel_ped', rel_ped)
+        self.linear_ped = nn.Conv2d(in_channels=2, out_channels=self.groups, kernel_size=1)
+        
+        self.conv_query = nn.Conv2d(in_channels, in_channels*self.kernel_len, kernel_size, padding='same', groups=in_channels, bias=bias)
+        self.conv_key = nn.Conv2d(in_channels, in_channels*self.kernel_len, kernel_size, padding='same', groups=in_channels, bias=bias)
+        self.conv_value = nn.Conv2d(in_channels, in_channels, kernel_size, stride, padding, dilation, groups=in_channels, bias=bias)
+        self.unfold = nn.Unfold(kernel_size=kernel_size, dilation=dilation, padding=padding, stride=stride)
+        self.linear = nn.Linear(in_channels, out_channels)
+
+        self.softmax = nn.Softmax(-1)
+        self.norm = nn.BatchNorm2d(self.in_channels)
+        self.relu = nn.ReLU(inplace=True)
+        self.reset_parameters()
+
+    def forward(self, inputs):
+        x = inputs
+        B, C, H, W = x.shape
+        if self.new_shape is None:
+            self.new_shape = self._new_shape(H,W)
+            self.new_pixel = self.new_shape[0]*self.new_shape[1]
+        query = self.conv_query(x)
+        key = self.conv_key(x)
+
+        query = self.unfold(query)
+        key = self.unfold(key)
+        value = self.unfold(x)
+
+        query = query.reshape(B, self.groups, self.group_out_channels, self.kernel_len, self.new_pixel).transpose(2,4)
+        query = query[:,:,:,self.center_idx:self.center_idx+1]
+
+        key = key.reshape(B, self.groups, self.group_out_channels, self.kernel_len, self.new_pixel).transpose(2,4)
+        key = key.transpose(3,4)
+
+        value = value.reshape(B, self.groups, self.in_channels//self.groups, self.kernel_len, self.new_pixel).transpose(2,4)
+
+        att = torch.matmul(query, key)
+        att = self.softmax(att)
+        att = torch.matmul(att, value)
+        att = att.transpose(2,4).reshape(B, self.in_channels, *self.new_shape)
+        x = self.conv_value(x)
+        x += att
+        x = self.relu(x)
+        x = self.norm(x) + inputs
+        x = self.linear(x.transpose(1,3)).transpose(1,3)
+        return x
+
+    def reset_parameters(self):
+        nn.init.kaiming_normal_(self.conv_query.weight, mode='fan_out', nonlinearity='relu')
+        nn.init.kaiming_normal_(self.conv_key.weight, mode='fan_out', nonlinearity='relu')
+        nn.init.kaiming_normal_(self.conv_value.weight, mode='fan_out', nonlinearity='relu')
+    
+
+class AttentionResConv(Conv):
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=4, bias=True, device=None):
+        super(AttentionResConv, self).__init__(in_channels, out_channels, kernel_size, stride, padding, dilation, groups, bias, device)
+
+        self.center_idx = (self.kernel_len-1)//2
+        self.group_out_channels = self.kernel_len * in_channels // groups
+        rel_ped_H = torch.arange(self.kernel_size[0]).reshape(1, 1, self.kernel_size[0], 1).repeat(1, 1,1,self.kernel_size[1])
+        rel_ped_W = torch.arange(self.kernel_size[0]).reshape(1, 1, 1, self.kernel_size[0]).repeat(1, 1,self.kernel_size[0],1)
+        rel_ped = torch.concat([rel_ped_H,rel_ped_W], dim=1).to(torch.float32)-(self.kernel_size[0]-1)//2
+        self.register_buffer('rel_ped', rel_ped)
+        self.linear_ped = nn.Conv2d(in_channels=2, out_channels=groups, kernel_size=1)
+        
+        self.conv_query = nn.Conv2d(in_channels, in_channels*self.kernel_len, kernel_size, padding='same', groups=groups, bias=bias)
+        self.conv_key = nn.Conv2d(in_channels, in_channels*self.kernel_len, kernel_size, padding='same', groups=groups, bias=bias)
+        self.conv_value = nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding, dilation, bias=bias)
+        self.unfold = nn.Unfold(kernel_size=kernel_size, dilation=dilation, padding=padding, stride=stride)
+        self.linear = nn.Linear(in_channels//groups, out_channels//groups)
+
+
+        self.softmax = nn.Softmax(-1)
+        self.norm = nn.BatchNorm2d(out_channels)
+        self.relu = nn.ReLU(inplace=True)
+        self.reset_parameters()
+
+    def forward(self, x):
+        B, C, H, W = x.shape
+        if self.new_shape is None:
+            self.new_shape = self._new_shape(H,W)
+            self.new_pixel = self.new_shape[0]*self.new_shape[1]
+        query = self.conv_query(x)
+        key = self.conv_key(x)
+
+        query = self.unfold(query)
+        key = self.unfold(key)
+        value = self.unfold(x)
+
+        query = query.reshape(B, self.groups, self.group_out_channels, self.kernel_len, self.new_pixel).transpose(2,4)
+        query = query[:,:,:,self.center_idx:self.center_idx+1]
+
+        key = key.reshape(B, self.groups, self.group_out_channels, self.kernel_len, self.new_pixel).transpose(2,4)
+        key = key.transpose(3,4)
+
+        value = value.reshape(B, self.groups, self.in_channels//self.groups, self.kernel_len, self.new_pixel).transpose(2,4)
+  
+        att = torch.matmul(query, key)
+        att += self.linear_ped(self.rel_ped).reshape(self.groups, 1, 1, self.kernel_len)
+        att = self.softmax(att)
+        att = torch.matmul(att, value)
+        att = self.linear(att)
+        att = att.transpose(2,4).reshape(B, self.out_channels, *self.new_shape)
+        x = self.conv_value(x)
+        x += att
+        return x
+
+    def reset_parameters(self):
+        nn.init.kaiming_normal_(self.conv_query.weight, mode='fan_out', nonlinearity='relu')
+        nn.init.kaiming_normal_(self.conv_key.weight, mode='fan_out', nonlinearity='relu')
+        nn.init.kaiming_normal_(self.conv_value.weight, mode='fan_out', nonlinearity='relu')
+    
+
 class AttentionConv(Conv):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=4, bias=True, device=None):
         super(AttentionConv, self).__init__(in_channels, out_channels, kernel_size, stride, padding, dilation, groups, bias, device)
@@ -18,7 +138,7 @@ class AttentionConv(Conv):
         self.unfold = nn.Unfold(kernel_size=kernel_size, dilation=dilation, padding=padding, stride=stride)
         
         self.softmax = nn.Softmax(-1)
-        self.norm = nn.BatchNorm2d(self.out_channels)
+        self.norm = nn.BatchNorm2d(out_channels)
         self.relu = nn.ReLU(inplace=True)
         self.reset_parameters()
 
@@ -55,77 +175,6 @@ class AttentionConv(Conv):
         nn.init.kaiming_normal_(self.conv_query.weight, mode='fan_out', nonlinearity='relu')
         nn.init.kaiming_normal_(self.conv_key.weight, mode='fan_out', nonlinearity='relu')
         nn.init.kaiming_normal_(self.conv_value.weight, mode='fan_out', nonlinearity='relu')
-    
-
-# class AttentionConv(nn.Module):
-#     def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=4, bias=True):
-#         super(AttentionConv, self).__init__()
-#         self.out_channels = out_channels
-#         self.kernel_size = kernel_size
-#         if isinstance(kernel_size, int):
-#             self.kernel_size = (kernel_size, kernel_size)
-#         self.stride = stride
-#         if isinstance(stride, int):
-#             self.stride = (stride, stride)
-#         self.padding = padding
-#         if isinstance(padding, int):
-#             self.padding = (padding, padding)
-#         self.dilation = dilation
-#         if isinstance(dilation, int):
-#             self.dilation = (dilation, dilation)
-#         self.groups = groups
-#         self.bias = bias
-#         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-#         assert in_channels % groups == 0
-
-#         self.kernel_len = self.kernel_size[0]*self.kernel_size[1]
-#         self.center_idx = (self.kernel_len-1)//2
-#         self.group_out_channels = self.kernel_len * in_channels // groups
-#         self.new_shape = None
-
-#         self.conv_query = nn.Conv2d(in_channels, in_channels*self.kernel_len, kernel_size, padding='same', groups=in_channels, bias=bias)
-#         self.conv_key = nn.Conv2d(in_channels, in_channels*self.kernel_len, kernel_size, padding='same', groups=in_channels, bias=bias)
-#         self.conv_value = nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, padding='same', bias=bias)
-#         self.unfold = nn.Unfold(kernel_size=kernel_size, dilation=dilation, padding=padding, stride=stride)
-        
-#         self.softmax = nn.Softmax(-1)
-#         self.reset_parameters()
-
-#     def forward(self, x):
-#         B, C, H, W = x.shape
-#         KH, KW = self.kernel_size
-#         if self.new_shape is None:
-#             self.new_shape = self._new_shape(H,W)
-#             self.new_pixel = self.new_shape[0]*self.new_shape[1]
-#         query = self.conv_query(x)
-#         key = self.conv_key(x)
-#         value = self.conv_value(x)
-#         query = self.unfold(query)
-#         key = self.unfold(key)
-#         value = self.unfold(value)
-
-#         query = query.reshape(B*self.groups, self.group_out_channels, self.kernel_len, self.new_pixel).transpose(1,3)
-#         query = query[:,:,self.center_idx:self.center_idx+1]
-#         key = key.reshape(B*self.groups, self.group_out_channels, self.kernel_len, self.new_pixel).transpose(1,3)
-#         value = value.reshape(B*self.groups, self.out_channels//self.groups, self.kernel_len, self.new_pixel).transpose(1,3)
-
-#         out = F._scaled_dot_product_attention(query,key,value)[0]
-#         out = out.transpose(1,3).reshape(B, self.out_channels, *self.new_shape)
-#         return out
-
-#     def reset_parameters(self):
-#         nn.init.kaiming_normal_(self.conv_query.weight, mode='fan_out', nonlinearity='relu')
-#         nn.init.kaiming_normal_(self.conv_key.weight, mode='fan_out', nonlinearity='relu')
-#         nn.init.kaiming_normal_(self.conv_value.weight, mode='fan_out', nonlinearity='relu')
-    
-#     def _new_shape(self, H, W):
-#         SH,SW = self.stride
-#         PH, PW = self.padding
-#         DH, DW = self.dilation
-#         KH, KW = self.kernel_size
-#         H_new = (H + 2*PH - DH*(KH-1)-1)//SH + 1
-#         W_new = (W + 2*PW - DW*(KW-1)-1)//SW + 1
-#         return H_new, W_new
 
 
 class NeighborAttention(Conv):

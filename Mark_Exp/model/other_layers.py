@@ -4,6 +4,7 @@ import torch.nn.functional as F
 from torch import  Tensor
 import numpy as np
 import math
+from torch.nn import Linear
 
 
 class PowerExpansion(nn.Module):
@@ -62,6 +63,7 @@ class PowerLinear(nn.Module):
 
 
 class MLP(nn.Module): 
+    
     def __init__(self, in_features: list, out_features: list, dims, activation='relu'):
         super(MLP, self).__init__() 
         self.in_features = in_features
@@ -96,8 +98,6 @@ class MLP(nn.Module):
         assert len(in_features) >= 2
         assert (type(dims) is int) or (len(dims) == len(in_features))
         assert activation in ['relu', 'elu']
-
-
 class RowWiseLinear(nn.Module):
     def __init__(self, height, width, out_width):
         super(RowWiseLinear, self).__init__()
@@ -133,3 +133,58 @@ class PositionalEncoding(nn.Module):
         x = x + self.pe[:x.size(0)]
         return self.dropout(x)
 
+
+class ResLinear(nn.Linear):
+    def __init__(self, n: int, in_features: int, out_features: int, bias: bool = True, device=None, dtype=None):
+        super(ResLinear, self).__init__(in_features, out_features, bias, device, dtype)
+        self.n = n
+        if n > 0:
+            self.fc1 = ResLinear(n-1, in_features, in_features, bias, device, dtype)
+            self.fc2 = ResLinear(n-1, in_features, out_features, bias, device, dtype)
+    
+    def forward(self, input):
+        x = F.linear(input, self.weight, self.bias)
+        if self.n>0:
+            w1 = self.fc1(input).unsqueeze(-2)
+            w2 = self.fc2(input).unsqueeze(-1)
+            w = torch.matmul(w2, w1)
+            x += torch.matmul(w, input.unsqueeze(-1)).squeeze(-1)
+        return x
+
+
+class ResMLP(nn.Module): 
+    def __init__(self, n: int, in_features: list, out_features: list, dims=-1, activation='relu'):
+        super(ResMLP, self).__init__()
+        self.n = n
+        self.in_features = in_features
+        self.out_features = out_features
+        self.test_paras(in_features, out_features, dims, activation)
+
+        if type(dims) is int:
+            self.dims = [dims]*(len(in_features))
+        
+        if activation == 'relu':
+            self.activate = nn.ReLU()
+        elif activation == 'elu':
+            self.activate = nn.ELU()
+        
+        self.fcs = nn.ModuleList([])
+        for i in range(len(self.in_features)):
+            self.fcs.append(ResLinear(self.n, in_features=in_features[i], out_features=out_features[i]))
+    
+    def forward(self,x):
+        for i, fc in enumerate(self.fcs):
+            x = x.transpose(self.dims[i], -1)
+            x = fc(x)
+            x = x.transpose(self.dims[i], -1)
+            if i != len(self.fcs)-1:
+                fc = self.activate(x)
+        return x
+    
+    def test_paras(self, in_features, out_features, dims, activation):
+        assert type(in_features) is list
+        assert type(out_features) is list
+        assert len(in_features) == len(out_features)
+        # assert len(in_features) >= 2
+        assert (type(dims) is int) or (len(dims) == len(in_features))
+        assert activation in ['relu', 'elu']
