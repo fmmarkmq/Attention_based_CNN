@@ -114,8 +114,8 @@ class Conv_Module(nn.Module):
 
         if self.if_residual:
             if self.input_channel != self.output_channel or (ds_size not in [(1,1), None]):
-                self.input_connect = nn.Sequential([nn.Conv2d(self.input_channel, self.output_channel, kernel_size=1, stride=ds_size),
-                                                    nn.BatchNorm2d(self.output_channel)])
+                self.input_connect = nn.Sequential(nn.Conv2d(self.input_channel, self.output_channel, kernel_size=1, stride=ds_size),
+                                                    nn.BatchNorm2d(self.output_channel))g
             else:
                 self.input_connect = nn.Identity()
             
