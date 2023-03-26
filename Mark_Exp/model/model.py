@@ -90,7 +90,7 @@ class Conv_Module(nn.Module):
         elif activation == 'elu':
             self.activate = nn.ELU
         elif activation == False:
-            self.activate = nn.Sequential
+            self.activate = nn.Identity
 
         self.pool = nn.AvgPool2d
         # self.pool = nn.MaxPool2d
@@ -113,10 +113,11 @@ class Conv_Module(nn.Module):
         self.layerlist = nn.Sequential(*layerlist)
 
         if self.if_residual:
-            self.input_connect = nn.Sequential()
             if self.input_channel != self.output_channel or (ds_size not in [(1,1), None]):
-                self.input_connect.append(nn.Conv2d(self.input_channel, self.output_channel, kernel_size=1, stride=ds_size))
-                self.input_connect.append(nn.BatchNorm2d(self.output_channel))
+                self.input_connect = nn.Sequential([nn.Conv2d(self.input_channel, self.output_channel, kernel_size=1, stride=ds_size),
+                                                    nn.BatchNorm2d(self.output_channel)])
+            else:
+                self.input_connect = nn.Identity()
             
         self.final_activate = self.activate()
         self._weight_initialize()
