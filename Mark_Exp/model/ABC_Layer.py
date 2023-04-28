@@ -68,7 +68,7 @@ class DepthAttentionResConv(Conv):
 class AttentionResConv(Conv):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=4, bias=True, device=None):
         super(AttentionResConv, self).__init__(in_channels, out_channels, kernel_size, stride, padding, dilation, groups, bias, device)
-
+        F.scaled_dot_product_attention
         self.center_idx = (self.kernel_len-1)//2
         self.group_out_channels = self.kernel_len * in_channels // groups
         rel_ped_H = torch.arange(self.kernel_size[0]).reshape(1, 1, self.kernel_size[0], 1).repeat(1, 1,1,self.kernel_size[1])
@@ -110,7 +110,7 @@ class AttentionResConv(Conv):
         value = value.reshape(B, self.groups, self.in_channels//self.groups, self.kernel_len, self.new_pixel).transpose(2,4)
   
         att = torch.matmul(query, key)
-        att += self.linear_ped(self.rel_ped).reshape(self.groups, 1, 1, self.kernel_len)
+        # att += self.linear_ped(self.rel_ped).reshape(self.groups, 1, 1, self.kernel_len)
         att = self.softmax(att)
         att = torch.matmul(att, value)
         att = self.linear(att)
@@ -124,6 +124,70 @@ class AttentionResConv(Conv):
         nn.init.kaiming_normal_(self.conv_key.weight, mode='fan_out', nonlinearity='relu')
         nn.init.kaiming_normal_(self.conv_value.weight, mode='fan_out', nonlinearity='relu')
     
+
+class AttentionResConv2(Conv):
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=4, bias=True, device=None):
+        super(AttentionResConv2, self).__init__(in_channels, out_channels, kernel_size, stride, padding, dilation, groups, bias, device)
+        F.scaled_dot_product_attention
+        self.center_idx = (self.kernel_len-1)//2
+        self.group_out_channels = self.kernel_len * in_channels // groups
+        rel_ped_H = torch.arange(self.kernel_size[0]).reshape(1, 1, self.kernel_size[0], 1).repeat(1, 1,1,self.kernel_size[1])
+        rel_ped_W = torch.arange(self.kernel_size[0]).reshape(1, 1, 1, self.kernel_size[0]).repeat(1, 1,self.kernel_size[0],1)
+        rel_ped = torch.concat([rel_ped_H,rel_ped_W], dim=1).to(torch.float32)-(self.kernel_size[0]-1)//2
+        self.register_buffer('rel_ped', rel_ped)
+        self.linear_ped = nn.Conv2d(in_channels=2, out_channels=groups, kernel_size=1)
+        
+        self.conv_query = nn.Conv2d(in_channels, in_channels*self.kernel_len, kernel_size, padding='same', groups=groups, bias=bias)
+        self.conv_key = nn.Conv2d(in_channels, in_channels*self.kernel_len, kernel_size, padding='same', groups=groups, bias=bias)
+        self.conv_value = nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding, dilation, bias=bias)
+        self.unfold = nn.Unfold(kernel_size=kernel_size, dilation=dilation, padding=padding, stride=stride)
+        self.linear = nn.Linear(in_channels//groups, out_channels//groups)
+
+
+        self.softmax = nn.Softmax(-1)
+        self.norm = nn.BatchNorm2d(out_channels)
+        self.relu = nn.ReLU(inplace=True)
+        self.reset_parameters()
+
+    def forward(self, x):
+        B, C, H, W = x.shape
+        if self.new_shape is None:
+            self.new_shape = self._new_shape(H,W)
+            self.new_pixel = self.new_shape[0]*self.new_shape[1]
+        query = self.conv_query(x)
+        key = self.conv_key(x)
+
+        query = self.unfold(query)
+        key = self.unfold(key)
+        value = self.unfold(x)
+
+        query = query.reshape(B, self.groups, self.group_out_channels, self.kernel_len, self.new_pixel).transpose(2,4)
+        query = query[:,:,:,self.center_idx:self.center_idx+1]
+
+        key = key.reshape(B, self.groups, self.group_out_channels, self.kernel_len, self.new_pixel).transpose(2,4)
+        # key = key.transpose(3,4)
+
+        value = value.reshape(B, self.groups, self.in_channels//self.groups, self.kernel_len, self.new_pixel).transpose(2,4)
+  
+        # att = torch.matmul(query, key)
+        # att += self.linear_ped(self.rel_ped).reshape(self.groups, 1, 1, self.kernel_len)
+        # att = self.softmax(att)
+        # att = torch.matmul(att, value)
+        print(query.shape, key.shape, value.shape)
+        with torch.backends.cuda.sdp_kernel(enable_math=False):
+            att = F.scaled_dot_product_attention(query, key, value)
+        att = self.linear(att)
+        att = att.transpose(2,4).reshape(B, self.out_channels, *self.new_shape)
+        x = self.conv_value(x)
+        x += att
+        return x
+
+    def reset_parameters(self):
+        nn.init.kaiming_normal_(self.conv_query.weight, mode='fan_out', nonlinearity='relu')
+        nn.init.kaiming_normal_(self.conv_key.weight, mode='fan_out', nonlinearity='relu')
+        nn.init.kaiming_normal_(self.conv_value.weight, mode='fan_out', nonlinearity='relu')
+    
+
 
 class AttentionConv(Conv):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=4, bias=True, device=None):

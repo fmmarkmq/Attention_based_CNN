@@ -42,10 +42,10 @@ class ABC_Driver(object):
             train_loss=[]
             model.train()
             for _, (inputs, labels) in enumerate(train_loader):
-                inputs=inputs.to(device)
+                inputs=inputs.to(device).to(torch.float16)
                 labels=labels.to(device)
                 optimizer.zero_grad(set_to_none=True)
-                preds = model(inputs)
+                preds = model(inputs).to(torch.float32)
                 loss = criterion(preds,labels)
                 train_loss.append(loss.item())
                 loss.backward()
@@ -68,7 +68,7 @@ class ABC_Driver(object):
         with torch.no_grad():
             preds = torch.tensor([])
             for _, (inputs, _) in enumerate(pred_loader):
-                pred = model(inputs.to(device)).cpu().detach()
+                pred = model(inputs.to(device).to(torch.float16)).cpu().detach()
                 preds = torch.concat([preds, pred], axis=0)
         return preds
 
@@ -116,7 +116,7 @@ class ABC_Driver(object):
             model = ABC_Net(self.args, self.hash).to(self.device[0])
         else:
             model = PipelineParallelABC_Net(self.args, self.hash, self.device)
-        return model
+        return model.to(torch.float16)
 
     def _build_record(self):
         if self.record_path == False:

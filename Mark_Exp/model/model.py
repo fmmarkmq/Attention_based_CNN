@@ -248,14 +248,16 @@ class ABC_Net(nn.Module):
     
 
 class PipelineParallelABC_Net(nn.Module):
-    def __init__(self, args: dotdict, hash, devices, split_size=20):
+    def __init__(self, args: dotdict, hash, devices, output_device=None, split_size=20):
         super(PipelineParallelABC_Net, self).__init__()
         self.args = args
         self.hash = hash
         self.device = devices
+        self.output_device = output_device or self.device[0]
         self.split_size = split_size
 
         self.args_first_half, self.args_second_half = self._build_args()
+        self.second_half_begining_device = self.device[1]
         self.module_first_half = ABC_Net(args=self.args_first_half, hash=self.hash).to(self.device[0])
         self.module_second_half = ABC_Net(args=self.args_second_half, hash=self.module_first_half.full_modules[-1].new_hash).to(self.device[1])
 
@@ -263,26 +265,26 @@ class PipelineParallelABC_Net(nn.Module):
     def forward(self, x):
         splits = iter(x.split(self.split_size, dim=0))
         s_next = next(splits)
-        s_prev = self.module_first_half(s_next).to(self.device[1])
+        s_prev = self.module_first_half(s_next).to(self.second_half_begining_device)
         ret = []
 
         for s_next in splits:
             s_prev = self.module_second_half(s_prev)
             ret.append(s_prev)
-            s_prev = self.module_first_half(s_next).to(self.device[1])
+            s_prev = self.module_first_half(s_next).to(self.second_half_begining_device)
 
         s_prev = self.module_second_half(s_prev)
         ret.append(s_prev)
 
-        return torch.concat(ret, dim=0).to(self.device[0])
+        return torch.concat(ret, dim=0).to(self.output_device)
 
 
     def _build_args(self):
         # full_modules_len = len(self.args.layers)
         args_first_half = dotdict(self.args.copy())
         args_second_half = dotdict(self.args.copy())
-        args_first_half.layers = self.args.layers[:3]
-        args_second_half.layers = self.args.layers[3:]
+        args_first_half.layers = self.args.layers[:4]
+        args_second_half.layers = self.args.layers[4:]
         return args_first_half, args_second_half
     
 
