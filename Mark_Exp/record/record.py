@@ -33,7 +33,7 @@ class EXPERecords(object):
         print(outcome)
         self.record = self.record[~self.record.isin(outcome.index)]
         loc = self.record.index.get_loc('train_loss')
-        self.record = self.record[:loc].append(outcome).append(self.record[loc:]).rename(self.record_index)
+        self.record = pd.concat([self.record[:loc],outcome,self.record[loc:]]).rename(self.record_index)
         if self.if_save:
             self._save()
 
