@@ -55,11 +55,9 @@ class Attack(object):
             adversary = AutoAttack(amodel, norm='Linf', eps=epsilon, version='standard')
             adversary.attacks_to_run = ['apgd-ce']
 
-        images = self.data_loader.dataset.data
-        images_shape = images.shape
-        images = images.reshape(images_shape[0], -1, images_shape[-2],images_shape[-1])
+        images = torch.tensor(self.data_loader.origin_data)
         images = (images-images.min())/images.max()
-        labels = self.data_loader.dataset.targets
+        labels = torch.tensor(self.data_loader.dataset.targets)
 
         _, y_adv = adversary.run_standard_evaluation(images, labels, bs=100, return_labels=True)
         return accuracy_score(labels, y_adv)

@@ -71,11 +71,11 @@ class AttentionResConv(Conv):
         F.scaled_dot_product_attention
         self.center_idx = (self.kernel_len-1)//2
         self.group_out_channels = self.kernel_len * in_channels // groups
-        rel_ped_H = torch.arange(self.kernel_size[0]).reshape(1, 1, self.kernel_size[0], 1).repeat(1, 1,1,self.kernel_size[1])
-        rel_ped_W = torch.arange(self.kernel_size[0]).reshape(1, 1, 1, self.kernel_size[0]).repeat(1, 1,self.kernel_size[0],1)
-        rel_ped = torch.concat([rel_ped_H,rel_ped_W], dim=1).to(torch.float32)-(self.kernel_size[0]-1)//2
-        self.register_buffer('rel_ped', rel_ped)
-        self.linear_ped = nn.Conv2d(in_channels=2, out_channels=groups, kernel_size=1)
+        # rel_ped_H = torch.arange(self.kernel_size[0]).reshape(1, 1, self.kernel_size[0], 1).repeat(1, 1,1,self.kernel_size[1])
+        # rel_ped_W = torch.arange(self.kernel_size[0]).reshape(1, 1, 1, self.kernel_size[0]).repeat(1, 1,self.kernel_size[0],1)
+        # rel_ped = torch.concat([rel_ped_H,rel_ped_W], dim=1).to(torch.float32)-(self.kernel_size[0]-1)//2
+        # self.register_buffer('rel_ped', rel_ped)
+        # self.linear_ped = nn.Conv2d(in_channels=2, out_channels=groups, kernel_size=1)
         
         self.conv_query = nn.Conv2d(in_channels, in_channels*self.kernel_len, kernel_size, padding='same', groups=groups, bias=bias)
         self.conv_key = nn.Conv2d(in_channels, in_channels*self.kernel_len, kernel_size, padding='same', groups=groups, bias=bias)

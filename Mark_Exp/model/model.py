@@ -283,8 +283,8 @@ class PipelineParallelABC_Net(nn.Module):
         # full_modules_len = len(self.args.layers)
         args_first_half = dotdict(self.args.copy())
         args_second_half = dotdict(self.args.copy())
-        args_first_half.layers = self.args.layers[:4]
-        args_second_half.layers = self.args.layers[4:]
+        args_first_half.layers = self.args.layers[:5]
+        args_second_half.layers = self.args.layers[5:]
         return args_first_half, args_second_half
     
 

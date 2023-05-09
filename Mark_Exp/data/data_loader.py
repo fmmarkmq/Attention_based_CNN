@@ -77,18 +77,21 @@ class ABC_Data_Loader(object):
             transform = transforms.Compose([transforms.ToTensor()])
             dataset = datasets.MNIST('../../data/ABC/mnist', train=False, download=True, transform=transform)
             attack = DataLoader(dataset, batch_size=self.args.predict_batch_size, shuffle=False)
+            attack.origin_data = attack.dataset.data.clone().detach().unsqueeze(1)
         elif self.args.name == "cifar10":
             bounds = (0,1)
             preprocessing = dict(mean=[0.4914, 0.4822, 0.4465], std=[0.2023, 0.1994, 0.2010], axis=-3)
             transform = transforms.Compose([transforms.ToTensor()])
             testset = datasets.CIFAR10(root='../../data/ABC/CIFAR10', train=False, download=True, transform=transform)
             attack = DataLoader(testset, batch_size=self.args.predict_batch_size, shuffle=False, num_workers=2)
+            attack.origin_data = torch.tensor(attack.dataset.data).permute(0,3,1,2)
         elif self.args.name == "cifar100":
             bounds = (0,1)
             preprocessing = dict(mean=[0.5070, 0.4865, 0.4409], std=[0.2673, 0.2564, 0.2761], axis=-3)
             transform = transforms.Compose([transforms.ToTensor()])
             testset = datasets.CIFAR100(root='../../data/ABC/CIFAR100', train=False, download=True, transform=transform)
             attack = DataLoader(testset, batch_size=self.args.predict_batch_size, shuffle=False, num_workers=2)
+            attack.origin_data = torch.tensor(attack.dataset.data).permute(0,3,1,2)
         elif self.args.name in ['atd', 'wiki_traffic', 'lat']:
             bounds, preprocessing = None, None
             dataset = TimeSeries_Pred_Dataset(df=self.data, history_len=self.args.history_len)
